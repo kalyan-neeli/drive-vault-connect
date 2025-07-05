@@ -6,9 +6,10 @@ interface HeaderProps {
   activeView: 'dashboard' | 'accounts' | 'files';
   onViewChange: (view: 'dashboard' | 'accounts' | 'files') => void;
   accountCount: number;
+  onSignOut: () => void;
 }
 
-export const Header = ({ activeView, onViewChange, accountCount }: HeaderProps) => {
+export const Header = ({ activeView, onViewChange, accountCount, onSignOut }: HeaderProps) => {
   return (
     <header className="bg-white border-b border-gray-200 shadow-sm">
       <div className="container mx-auto px-4 py-4">
@@ -47,6 +48,14 @@ export const Header = ({ activeView, onViewChange, accountCount }: HeaderProps) 
               onClick={() => onViewChange('files')}
             >
               Files
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={onSignOut}
+              className="ml-4"
+            >
+              Sign Out
             </Button>
           </nav>
         </div>

@@ -1,45 +1,57 @@
 
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { GoogleAccount } from "@/types/auth";
 import { formatBytes } from "@/utils/formatBytes";
 import { useToast } from "@/hooks/use-toast";
+import { GoogleAuthService, GoogleAccount } from "@/services/googleAuth";
 
 interface AccountManagerProps {
   accounts: GoogleAccount[];
-  onAddAccount: (account: GoogleAccount) => void;
-  onRemoveAccount: (accountId: string) => void;
+  onAccountsChange: () => void;
 }
 
-export const AccountManager = ({ accounts, onAddAccount, onRemoveAccount }: AccountManagerProps) => {
+export const AccountManager = ({ accounts, onAccountsChange }: AccountManagerProps) => {
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const [googleAuth] = useState(new GoogleAuthService());
 
-  const handleGoogleAuth = async () => {
-    // Mock Google OAuth flow - in real implementation, this would use Google OAuth
-    const mockAccount: GoogleAccount = {
-      id: `account_${Date.now()}`,
-      email: `user${accounts.length + 1}@gmail.com`,
-      name: `Google User ${accounts.length + 1}`,
-      accessToken: 'mock_access_token',
-      refreshToken: 'mock_refresh_token',
-      totalStorage: 15 * 1024 * 1024 * 1024, // 15GB
-      usedStorage: Math.floor(Math.random() * 10 * 1024 * 1024 * 1024), // Random used storage
-      connectedAt: new Date(),
-    };
-
-    onAddAccount(mockAccount);
-    toast({
-      title: "Account Connected",
-      description: `Successfully connected ${mockAccount.email}`,
-    });
+  const handleAddAccount = async () => {
+    setLoading(true);
+    try {
+      await googleAuth.connectAccount();
+      onAccountsChange();
+      toast({
+        title: "Account Connected",
+        description: "Successfully connected your Google account",
+      });
+    } catch (error) {
+      console.error('Error connecting account:', error);
+      toast({
+        title: "Connection Failed",
+        description: "Failed to connect Google account. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRemoveAccount = (account: GoogleAccount) => {
-    onRemoveAccount(account.id);
-    toast({
-      title: "Account Removed",
-      description: `Disconnected ${account.email}`,
-    });
+  const handleRemoveAccount = async (accountId: string) => {
+    try {
+      await googleAuth.removeAccount(accountId);
+      onAccountsChange();
+      toast({
+        title: "Account Removed",
+        description: "Successfully disconnected the account",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to remove account",
+        variant: "destructive"
+      });
+    }
   };
 
   return (
@@ -55,7 +67,8 @@ export const AccountManager = ({ accounts, onAddAccount, onRemoveAccount }: Acco
         </CardHeader>
         <CardContent>
           <Button 
-            onClick={handleGoogleAuth}
+            onClick={handleAddAccount}
+            disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700"
           >
             <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
@@ -64,7 +77,7 @@ export const AccountManager = ({ accounts, onAddAccount, onRemoveAccount }: Acco
               <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
               <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
             </svg>
-            Connect Google Account
+            {loading ? 'Connecting...' : 'Connect Google Account'}
           </Button>
         </CardContent>
       </Card>
@@ -101,7 +114,7 @@ export const AccountManager = ({ accounts, onAddAccount, onRemoveAccount }: Acco
                   <Button 
                     variant="destructive" 
                     size="sm"
-                    onClick={() => handleRemoveAccount(account)}
+                    onClick={() => handleRemoveAccount(account.id)}
                   >
                     Remove
                   </Button>

@@ -9,7 +9,152 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      drive_files: {
+        Row: {
+          created_at: string | null
+          created_time: string | null
+          download_url: string | null
+          drive_file_id: string
+          google_account_id: string
+          id: string
+          is_deleted: boolean | null
+          mime_type: string
+          modified_time: string | null
+          name: string
+          size: number | null
+          synced_at: string | null
+          thumbnail_url: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          created_time?: string | null
+          download_url?: string | null
+          drive_file_id: string
+          google_account_id: string
+          id?: string
+          is_deleted?: boolean | null
+          mime_type: string
+          modified_time?: string | null
+          name: string
+          size?: number | null
+          synced_at?: string | null
+          thumbnail_url?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          created_time?: string | null
+          download_url?: string | null
+          drive_file_id?: string
+          google_account_id?: string
+          id?: string
+          is_deleted?: boolean | null
+          mime_type?: string
+          modified_time?: string | null
+          name?: string
+          size?: number | null
+          synced_at?: string | null
+          thumbnail_url?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drive_files_google_account_id_fkey"
+            columns: ["google_account_id"]
+            isOneToOne: false
+            referencedRelation: "google_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      google_accounts: {
+        Row: {
+          access_token: string
+          avatar_url: string | null
+          connected_at: string | null
+          created_at: string | null
+          email: string
+          google_account_id: string
+          id: string
+          last_synced_at: string | null
+          name: string
+          refresh_token: string
+          status: Database["public"]["Enums"]["account_status"] | null
+          token_expires_at: string
+          total_storage: number | null
+          updated_at: string | null
+          used_storage: number | null
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          avatar_url?: string | null
+          connected_at?: string | null
+          created_at?: string | null
+          email: string
+          google_account_id: string
+          id?: string
+          last_synced_at?: string | null
+          name: string
+          refresh_token: string
+          status?: Database["public"]["Enums"]["account_status"] | null
+          token_expires_at: string
+          total_storage?: number | null
+          updated_at?: string | null
+          used_storage?: number | null
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          avatar_url?: string | null
+          connected_at?: string | null
+          created_at?: string | null
+          email?: string
+          google_account_id?: string
+          id?: string
+          last_synced_at?: string | null
+          name?: string
+          refresh_token?: string
+          status?: Database["public"]["Enums"]["account_status"] | null
+          token_expires_at?: string
+          total_storage?: number | null
+          updated_at?: string | null
+          used_storage?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          email: string | null
+          id: string
+          name: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          email?: string | null
+          id: string
+          name?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          name?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -18,7 +163,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      account_status: "active" | "expired" | "revoked" | "error"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -133,6 +278,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      account_status: ["active", "expired", "revoked", "error"],
+    },
   },
 } as const

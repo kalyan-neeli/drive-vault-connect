@@ -1,15 +1,6 @@
 
-export interface GoogleAccount {
-  id: string;
-  email: string;
-  name: string;
-  avatar?: string;
-  accessToken: string;
-  refreshToken: string;
-  totalStorage: number; // in bytes
-  usedStorage: number; // in bytes
-  connectedAt: Date;
-}
+// Re-export from services for backward compatibility
+export type { GoogleAccount } from '@/services/googleAuth';
 
 export interface AuthState {
   isAuthenticated: boolean;
@@ -17,14 +8,5 @@ export interface AuthState {
   currentAccount?: GoogleAccount;
 }
 
-export interface DriveFile {
-  id: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  createdTime: string;
-  modifiedTime: string;
-  accountId: string;
-  downloadUrl?: string;
-  thumbnailUrl?: string;
-}
+// Re-export from services for backward compatibility
+export type { DriveFile } from '@/services/driveService';

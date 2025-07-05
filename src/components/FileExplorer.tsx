@@ -1,11 +1,12 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { GoogleAccount, DriveFile } from "@/types/auth";
 import { formatBytes } from "@/utils/formatBytes";
 import { useToast } from "@/hooks/use-toast";
+import { DriveService, DriveFile } from "@/services/driveService";
+import { GoogleAccount } from "@/services/googleAuth";
 
 interface FileExplorerProps {
   accounts: GoogleAccount[];
@@ -15,41 +16,42 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const [driveService] = useState(new DriveService());
 
-  // Mock files for demonstration
-  const mockFiles: DriveFile[] = [
-    {
-      id: "1",
-      name: "Project Presentation.pptx",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      size: 2048000,
-      createdTime: "2024-01-15T10:30:00Z",
-      modifiedTime: "2024-01-15T10:30:00Z",
-      accountId: accounts[0]?.id || "account1"
-    },
-    {
-      id: "2",
-      name: "Meeting Notes.docx",
-      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      size: 512000,
-      createdTime: "2024-01-14T14:20:00Z",
-      modifiedTime: "2024-01-14T14:20:00Z",
-      accountId: accounts[0]?.id || "account1"
-    },
-    {
-      id: "3",
-      name: "Budget Spreadsheet.xlsx",
-      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      size: 1024000,
-      createdTime: "2024-01-13T09:15:00Z",
-      modifiedTime: "2024-01-13T09:15:00Z",
-      accountId: accounts[1]?.id || "account2"
+  useEffect(() => {
+    if (accounts.length > 0) {
+      loadFiles();
     }
-  ];
+  }, [accounts]);
 
-  const displayFiles = accounts.length > 0 ? mockFiles : [];
-  const filteredFiles = displayFiles.filter(file => 
+  const loadFiles = async () => {
+    if (accounts.length === 0) return;
+    
+    setLoading(true);
+    try {
+      const allFiles: DriveFile[] = [];
+      
+      for (const account of accounts) {
+        const accountFiles = await driveService.getFiles(account.id);
+        allFiles.push(...accountFiles);
+      }
+      
+      setFiles(allFiles);
+    } catch (error) {
+      console.error('Error loading files:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load files",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredFiles = files.filter(file => 
     file.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -59,26 +61,23 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
 
     setUploading(true);
     
-    // Mock upload process
-    setTimeout(() => {
-      const newFile: DriveFile = {
-        id: `file_${Date.now()}`,
-        name: file.name,
-        mimeType: file.type,
-        size: file.size,
-        createdTime: new Date().toISOString(),
-        modifiedTime: new Date().toISOString(),
-        accountId: accounts[0].id
-      };
-      
-      setFiles(prev => [...prev, newFile]);
-      setUploading(false);
+    try {
+      await driveService.uploadFile(file, accounts[0].id);
+      await loadFiles(); // Refresh file list
       
       toast({
         title: "File Uploaded",
         description: `Successfully uploaded ${file.name}`,
       });
-    }, 2000);
+    } catch (error) {
+      toast({
+        title: "Upload Failed",
+        description: "Failed to upload file",
+        variant: "destructive"
+      });
+    } finally {
+      setUploading(false);
+    }
   };
 
   const getFileIcon = (mimeType: string) => {
@@ -97,14 +96,14 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
     return account?.email || 'Unknown Account';
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="text-3xl font-bold text-gray-900 mb-2">File Explorer</h2>
-        <p className="text-gray-600">Browse and manage files across all your connected Google Drive accounts</p>
-      </div>
+  if (accounts.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center">
+          <h2 className="text-3xl font-bold text-gray-900 mb-2">File Explorer</h2>
+          <p className="text-gray-600">Browse and manage files across all your connected Google Drive accounts</p>
+        </div>
 
-      {accounts.length === 0 ? (
         <Card className="text-center p-8">
           <CardContent className="pt-6">
             <div className="w-16 h-16 bg-gray-100 rounded-full mx-auto mb-4 flex items-center justify-center">
@@ -116,75 +115,93 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
             </p>
           </CardContent>
         </Card>
-      ) : (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle>File Operations</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex gap-4">
-                <Input
-                  placeholder="Search files..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="flex-1"
-                />
-                <div className="relative">
-                  <Input
-                    type="file"
-                    onChange={handleFileUpload}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    disabled={uploading}
-                  />
-                  <Button disabled={uploading}>
-                    {uploading ? "Uploading..." : "Upload File"}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+      </div>
+    );
+  }
 
-          <div className="grid gap-4">
-            {filteredFiles.map((file) => (
-              <Card key={file.id} className="hover:shadow-md transition-shadow">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <div className="text-2xl">
-                        {getFileIcon(file.mimeType)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-semibold truncate">{file.name}</h4>
-                        <div className="flex items-center space-x-4 text-sm text-gray-600">
-                          <span>{formatBytes(file.size)}</span>
-                          <span>{getAccountName(file.accountId)}</span>
-                          <span>{new Date(file.modifiedTime).toLocaleDateString()}</span>
-                        </div>
-                      </div>
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <h2 className="text-3xl font-bold text-gray-900 mb-2">File Explorer</h2>
+        <p className="text-gray-600">Browse and manage files across all your connected Google Drive accounts</p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>File Operations</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-4">
+            <Input
+              placeholder="Search files..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1"
+            />
+            <div className="relative">
+              <Input
+                type="file"
+                onChange={handleFileUpload}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                disabled={uploading}
+              />
+              <Button disabled={uploading}>
+                {uploading ? "Uploading..." : "Upload File"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {loading ? (
+        <Card className="text-center p-8">
+          <CardContent className="pt-6">
+            <p className="text-gray-600">Loading files...</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4">
+          {filteredFiles.map((file) => (
+            <Card key={`${file.accountId}-${file.id}`} className="hover:shadow-md transition-shadow">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="text-2xl">
+                      {getFileIcon(file.mimeType)}
                     </div>
-                    <div className="flex space-x-2">
-                      <Button variant="outline" size="sm">
-                        Download
-                      </Button>
-                      <Button variant="outline" size="sm">
-                        Share
-                      </Button>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold truncate">{file.name}</h4>
+                      <div className="flex items-center space-x-4 text-sm text-gray-600">
+                        <span>{formatBytes(file.size)}</span>
+                        <span>{getAccountName(file.accountId)}</span>
+                        <span>{new Date(file.modifiedTime).toLocaleDateString()}</span>
+                      </div>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {filteredFiles.length === 0 && searchTerm && (
-            <Card className="text-center p-8">
-              <CardContent className="pt-6">
-                <p className="text-gray-600">No files found matching "{searchTerm}"</p>
+                  <div className="flex space-x-2">
+                    {file.downloadUrl && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => window.open(file.downloadUrl, '_blank')}
+                      >
+                        View
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </CardContent>
             </Card>
-          )}
-        </>
+          ))}
+        </div>
+      )}
+
+      {filteredFiles.length === 0 && searchTerm && !loading && (
+        <Card className="text-center p-8">
+          <CardContent className="pt-6">
+            <p className="text-gray-600">No files found matching "{searchTerm}"</p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

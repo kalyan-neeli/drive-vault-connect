@@ -1,8 +1,8 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { GoogleAccount } from "@/types/auth";
 import { formatBytes } from "@/utils/formatBytes";
+import { GoogleAccount } from "@/services/googleAuth";
 
 interface StorageDashboardProps {
   accounts: GoogleAccount[];
