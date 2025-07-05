@@ -1,7 +1,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
-const GOOGLE_CLIENT_ID = 'afasj,gnsdkjgbndts.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '509857069478-q85n7l2cogr5muodad8mtd6g7e1isdts.apps.googleusercontent.com';
 const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
