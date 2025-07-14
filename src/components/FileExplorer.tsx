@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatBytes } from "@/utils/formatBytes";
 import { useToast } from "@/hooks/use-toast";
 import { DriveService, DriveFile } from "@/services/driveService";
@@ -17,6 +18,9 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [targetAccount, setTargetAccount] = useState<string>("");
+  const [largestFiles, setLargestFiles] = useState<DriveFile[]>([]);
   const { toast } = useToast();
   const [driveService] = useState(new DriveService());
 
@@ -62,7 +66,14 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
     setUploading(true);
     
     try {
-      await driveService.uploadFile(file, accounts[0].id);
+      // Check primary account storage and auto-move files if needed
+      const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
+      if (primaryAccount) {
+        await driveService.checkStorageAndAutoMove(primaryAccount.id);
+      }
+
+      // Upload using smart account selection
+      await driveService.uploadFile(file);
       await loadFiles(); // Refresh file list
       
       toast({
@@ -79,6 +90,52 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
       setUploading(false);
     }
   };
+
+  const loadLargestFiles = async () => {
+    const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
+    if (!primaryAccount) return;
+
+    try {
+      const largest = await driveService.getLargestFiles(primaryAccount.id, 10);
+      setLargestFiles(largest);
+    } catch (error) {
+      console.error('Error loading largest files:', error);
+    }
+  };
+
+  const handleMoveSelectedFiles = async () => {
+    if (selectedFiles.length === 0 || !targetAccount) return;
+
+    const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
+    if (!primaryAccount) return;
+
+    try {
+      for (const fileId of selectedFiles) {
+        await driveService.moveFileToBackup(fileId, primaryAccount.id, targetAccount, true);
+      }
+      
+      setSelectedFiles([]);
+      await loadFiles();
+      await loadLargestFiles();
+      
+      toast({
+        title: "Files Moved",
+        description: `Successfully moved ${selectedFiles.length} files to backup`,
+      });
+    } catch (error) {
+      toast({
+        title: "Move Failed",
+        description: "Failed to move files to backup",
+        variant: "destructive"
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (accounts.length > 0) {
+      loadLargestFiles();
+    }
+  }, [accounts]);
 
   const getFileIcon = (mimeType: string) => {
     if (mimeType.includes('image')) return '🖼️';
@@ -119,6 +176,9 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
     );
   }
 
+  const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
+  const backupAccounts = accounts.filter(acc => acc.accountType === 'backup');
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -153,6 +213,62 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
         </CardContent>
       </Card>
 
+      {primaryAccount && largestFiles.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Manage Storage - Largest Files</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <label className="text-sm font-medium">Move to Backup Account:</label>
+                <Select value={targetAccount} onValueChange={setTargetAccount}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select backup account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {backupAccounts.map(account => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.email} ({formatBytes((account.totalStorage || 0) - (account.usedStorage || 0))} free)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button 
+                onClick={handleMoveSelectedFiles} 
+                disabled={selectedFiles.length === 0 || !targetAccount}
+              >
+                Move Selected ({selectedFiles.length})
+              </Button>
+            </div>
+            
+            <div className="grid gap-2 max-h-60 overflow-y-auto">
+              {largestFiles.map(file => (
+                <div key={file.id} className="flex items-center space-x-3 p-2 border rounded">
+                  <input
+                    type="checkbox"
+                    checked={selectedFiles.includes(file.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedFiles([...selectedFiles, file.id]);
+                      } else {
+                        setSelectedFiles(selectedFiles.filter(id => id !== file.id));
+                      }
+                    }}
+                  />
+                  <span className="text-xl">{getFileIcon(file.mimeType)}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{file.name}</p>
+                    <p className="text-sm text-gray-600">{formatBytes(file.size)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {loading ? (
         <Card className="text-center p-8">
           <CardContent className="pt-6">
@@ -173,7 +289,7 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
                       <h4 className="font-semibold truncate">{file.name}</h4>
                       <div className="flex items-center space-x-4 text-sm text-gray-600">
                         <span>{formatBytes(file.size)}</span>
-                        <span>{getAccountName(file.accountId)}</span>
+                        <span>{getAccountName(file.accountId)} ({accounts.find(acc => acc.id === file.accountId)?.accountType})</span>
                         <span>{new Date(file.modifiedTime).toLocaleDateString()}</span>
                       </div>
                     </div>

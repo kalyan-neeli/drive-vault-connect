@@ -227,6 +227,12 @@ export class GoogleAuthService {
   private async createSharedFolder(backupAccount: GoogleAccount, primaryAccount: GoogleAccount): Promise<string> {
     const folderName = `shared_${primaryAccount.email}`;
     
+    // First check if shared folder already exists
+    const existingFolderId = await this.findExistingSharedFolder(backupAccount.accessToken, folderName, primaryAccount.email);
+    if (existingFolderId) {
+      return existingFolderId;
+    }
+
     // Create folder in backup account
     const folderMetadata = {
       name: folderName,
@@ -269,6 +275,45 @@ export class GoogleAuthService {
     }
 
     return folder.id;
+  }
+
+  private async findExistingSharedFolder(accessToken: string, folderName: string, primaryEmail: string): Promise<string | null> {
+    try {
+      // Search for folders with the expected name
+      const searchResponse = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=name='${folderName}' and mimeType='application/vnd.google-apps.folder'&fields=files(id,name)`,
+        {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        }
+      );
+
+      const searchData = await searchResponse.json();
+      
+      if (searchData.files && searchData.files.length > 0) {
+        // Check if the folder is shared with the primary account
+        for (const folder of searchData.files) {
+          const permissionsResponse = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${folder.id}/permissions`,
+            {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            }
+          );
+
+          const permissionsData = await permissionsResponse.json();
+          const hasWriterPermission = permissionsData.permissions?.some(
+            (perm: any) => perm.emailAddress === primaryEmail && perm.role === 'writer'
+          );
+
+          if (hasWriterPermission) {
+            return folder.id;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking for existing shared folder:', error);
+    }
+
+    return null;
   }
 
   private async updateSharedFolderId(accountId: string, sharedFolderId: string): Promise<void> {
