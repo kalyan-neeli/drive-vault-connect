@@ -1,7 +1,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
-const GOOGLE_CLIENT_ID = '509857069478-q85n7l2cogr5muodad8mtd6g7e1isdts.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = 'afasj,gnsdkjgbndts.apps.googleusercontent.com';
 const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
@@ -19,6 +19,8 @@ export interface GoogleAccount {
   totalStorage: number;
   usedStorage: number;
   connectedAt: Date;
+  accountType: 'primary' | 'backup';
+  sharedFolderId?: string;
 }
 
 declare global {
@@ -98,6 +100,10 @@ export class GoogleAuthService {
           // Get storage info from Drive API
           const storageInfo = await this.getStorageInfo(authResponse.access_token);
           
+          // Check if this is the first account (will be primary)
+          const existingAccounts = await this.getConnectedAccounts();
+          const accountType = existingAccounts.length === 0 ? 'primary' : 'backup';
+          
           const account: GoogleAccount = {
             id: profile.getId(),
             email: profile.getEmail(),
@@ -107,11 +113,22 @@ export class GoogleAuthService {
             refreshToken: authResponse.refresh_token || '',
             totalStorage: storageInfo.limit,
             usedStorage: storageInfo.usage,
-            connectedAt: new Date()
+            connectedAt: new Date(),
+            accountType
           };
 
           // Store in Supabase
           await this.storeAccountInDatabase(account);
+          
+          // If this is a backup account, create shared folder and set permissions
+          if (accountType === 'backup') {
+            const primaryAccount = existingAccounts.find(acc => acc.accountType === 'primary');
+            if (primaryAccount) {
+              const sharedFolderId = await this.createSharedFolder(account, primaryAccount);
+              account.sharedFolderId = sharedFolderId;
+              await this.updateSharedFolderId(account.id, sharedFolderId);
+            }
+          }
           
           resolve(account);
         } catch (error) {
@@ -159,7 +176,9 @@ export class GoogleAuthService {
         token_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(), // 1 hour from now
         total_storage: account.totalStorage,
         used_storage: account.usedStorage,
-        connected_at: account.connectedAt.toISOString()
+        connected_at: account.connectedAt.toISOString(),
+        account_type: account.accountType,
+        shared_folder_id: account.sharedFolderId
       });
 
     if (error) throw error;
@@ -186,7 +205,9 @@ export class GoogleAuthService {
       refreshToken: account.refresh_token,
       totalStorage: account.total_storage || 0,
       usedStorage: account.used_storage || 0,
-      connectedAt: new Date(account.connected_at)
+      connectedAt: new Date(account.connected_at),
+      accountType: account.account_type as 'primary' | 'backup',
+      sharedFolderId: account.shared_folder_id
     }));
   }
 
@@ -197,6 +218,86 @@ export class GoogleAuthService {
     const { error } = await supabase
       .from('google_accounts')
       .delete()
+      .eq('user_id', user.user.id)
+      .eq('google_account_id', accountId);
+
+    if (error) throw error;
+  }
+
+  private async createSharedFolder(backupAccount: GoogleAccount, primaryAccount: GoogleAccount): Promise<string> {
+    const folderName = `shared_${primaryAccount.email}`;
+    
+    // Create folder in backup account
+    const folderMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder'
+    };
+
+    const createResponse = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${backupAccount.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(folderMetadata)
+    });
+
+    if (!createResponse.ok) {
+      throw new Error('Failed to create shared folder');
+    }
+
+    const folder = await createResponse.json();
+    
+    // Share the folder with primary account
+    const permission = {
+      role: 'writer',
+      type: 'user',
+      emailAddress: primaryAccount.email
+    };
+
+    const shareResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${folder.id}/permissions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${backupAccount.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(permission)
+    });
+
+    if (!shareResponse.ok) {
+      throw new Error('Failed to share folder with primary account');
+    }
+
+    return folder.id;
+  }
+
+  private async updateSharedFolderId(accountId: string, sharedFolderId: string): Promise<void> {
+    const { data: user } = await supabase.auth.getUser();
+    if (!user.user) throw new Error('User not authenticated');
+
+    const { error } = await supabase
+      .from('google_accounts')
+      .update({ shared_folder_id: sharedFolderId })
+      .eq('user_id', user.user.id)
+      .eq('google_account_id', accountId);
+
+    if (error) throw error;
+  }
+
+  async setPrimaryAccount(accountId: string): Promise<void> {
+    const { data: user } = await supabase.auth.getUser();
+    if (!user.user) throw new Error('User not authenticated');
+
+    // First, set all accounts to backup
+    await supabase
+      .from('google_accounts')
+      .update({ account_type: 'backup' })
+      .eq('user_id', user.user.id);
+
+    // Then set the selected account as primary
+    const { error } = await supabase
+      .from('google_accounts')
+      .update({ account_type: 'primary' })
       .eq('user_id', user.user.id)
       .eq('google_account_id', accountId);
 

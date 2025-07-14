@@ -54,6 +54,23 @@ export const AccountManager = ({ accounts, onAccountsChange }: AccountManagerPro
     }
   };
 
+  const handleSetPrimary = async (accountId: string) => {
+    try {
+      await googleAuth.setPrimaryAccount(accountId);
+      onAccountsChange();
+      toast({
+        title: "Primary Account Updated",
+        description: "Successfully set as primary account",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to set primary account",
+        variant: "destructive"
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -103,21 +120,49 @@ export const AccountManager = ({ accounts, onAccountsChange }: AccountManagerPro
                         </span>
                       </div>
                     )}
-                    <div>
-                      <h4 className="font-semibold">{account.name}</h4>
+                     <div>
+                      <h4 className="font-semibold flex items-center gap-2">
+                        {account.name}
+                        {account.accountType === 'primary' && (
+                          <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                            Primary
+                          </span>
+                        )}
+                        {account.accountType === 'backup' && (
+                          <span className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded-full">
+                            Backup
+                          </span>
+                        )}
+                      </h4>
                       <p className="text-sm text-gray-600">{account.email}</p>
                       <p className="text-xs text-gray-500">
                         {formatBytes(account.usedStorage)} of {formatBytes(account.totalStorage)} used
                       </p>
+                      {account.accountType === 'backup' && account.sharedFolderId && (
+                        <p className="text-xs text-green-600">
+                          ✓ Shared folder created
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <Button 
-                    variant="destructive" 
-                    size="sm"
-                    onClick={() => handleRemoveAccount(account.id)}
-                  >
-                    Remove
-                  </Button>
+                  <div className="flex gap-2">
+                    {account.accountType === 'backup' && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleSetPrimary(account.id)}
+                      >
+                        Set as Primary
+                      </Button>
+                    )}
+                    <Button 
+                      variant="destructive" 
+                      size="sm"
+                      onClick={() => handleRemoveAccount(account.id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
