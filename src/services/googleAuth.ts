@@ -2,12 +2,13 @@
 import { supabase } from '@/integrations/supabase/client';
 
 const GOOGLE_CLIENT_ID = 'afasj,gnsdkjgbndts.apps.googleusercontent.com';
+// Note: For refresh tokens to work in production, you'll need to add the client secret to Supabase Edge Functions
 const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
-  'https://www.googleapis.com/auth/userinfo.profile',
+  'https://www.googleapis.com/auth/userinfo.profile', 
   'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/drive.file'
-].join(' ');
+];
 
 export interface GoogleAccount {
   id: string;
@@ -23,119 +24,170 @@ export interface GoogleAccount {
   sharedFolderId?: string;
 }
 
-declare global {
-  interface Window {
-    google: any;
-    gapi: any;
-  }
-}
-
 export class GoogleAuthService {
-  private isInitialized = false;
+  private codeVerifier = '';
+  private codeChallenge = '';
 
-  async initialize(): Promise<void> {
-    if (this.isInitialized) return;
-
-    return new Promise((resolve, reject) => {
-      if (typeof window === 'undefined') {
-        reject(new Error('Google Auth can only be used in browser'));
-        return;
-      }
-
-      // Load Google API script
-      const script = document.createElement('script');
-      script.src = 'https://accounts.google.com/gsi/client';
-      script.onload = () => {
-        window.google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          callback: this.handleCredentialResponse.bind(this),
-        });
-
-        // Load GAPI for Drive API
-        const gapiScript = document.createElement('script');
-        gapiScript.src = 'https://apis.google.com/js/api.js';
-        gapiScript.onload = () => {
-          window.gapi.load('client:auth2', () => {
-            window.gapi.client.init({
-              apiKey: '', // We'll use OAuth token instead
-              clientId: GOOGLE_CLIENT_ID,
-              discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-              scope: SCOPES
-            }).then(() => {
-              this.isInitialized = true;
-              resolve();
-            });
-          });
-        };
-        document.head.appendChild(gapiScript);
-      };
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
+  private getRedirectUri(): string {
+    return `${window.location.origin}/auth/callback`;
   }
 
-  private async handleCredentialResponse(response: any) {
-    try {
-      const credential = response.credential;
-      // This is for the One Tap flow - we'll handle OAuth flow separately
-      console.log('Credential response:', credential);
-    } catch (error) {
-      console.error('Error handling credential response:', error);
-    }
+  // Generate PKCE code verifier and challenge
+  private async generatePKCE(): Promise<void> {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    this.codeVerifier = btoa(String.fromCharCode.apply(null, Array.from(array)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+
+    const encoder = new TextEncoder();
+    const data = encoder.encode(this.codeVerifier);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    this.codeChallenge = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(digest))))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
   }
 
   async connectAccount(): Promise<GoogleAccount> {
-    await this.initialize();
+    try {
+      // Generate PKCE parameters
+      await this.generatePKCE();
 
-    return new Promise((resolve, reject) => {
-      const authInstance = window.gapi.auth2.getAuthInstance();
-      
-      authInstance.signIn({
-        scope: SCOPES
-      }).then(async (googleUser: any) => {
-        try {
-          const profile = googleUser.getBasicProfile();
-          const authResponse = googleUser.getAuthResponse();
-          
-          // Get storage info from Drive API
-          const storageInfo = await this.getStorageInfo(authResponse.access_token);
-          
-          // Check if this is the first account (will be primary)
-          const existingAccounts = await this.getConnectedAccounts();
-          const accountType = existingAccounts.length === 0 ? 'primary' : 'backup';
-          
-          const account: GoogleAccount = {
-            id: profile.getId(),
-            email: profile.getEmail(),
-            name: profile.getName(),
-            avatar: profile.getImageUrl(),
-            accessToken: authResponse.access_token,
-            refreshToken: authResponse.refresh_token || '',
-            totalStorage: storageInfo.limit,
-            usedStorage: storageInfo.usage,
-            connectedAt: new Date(),
-            accountType
-          };
+      // Build authorization URL
+      const redirectUri = this.getRedirectUri();
+      const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      authUrl.searchParams.set('client_id', GOOGLE_CLIENT_ID);
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('scope', SCOPES.join(' '));
+      authUrl.searchParams.set('access_type', 'offline');
+      authUrl.searchParams.set('prompt', 'consent');
+      authUrl.searchParams.set('code_challenge', this.codeChallenge);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+      authUrl.searchParams.set('state', crypto.randomUUID());
 
-          // Store in Supabase
-          await this.storeAccountInDatabase(account);
-          
-          // If this is a backup account, create shared folder and set permissions
-          if (accountType === 'backup') {
-            const primaryAccount = existingAccounts.find(acc => acc.accountType === 'primary');
-            if (primaryAccount) {
-              const sharedFolderId = await this.createSharedFolder(account, primaryAccount);
-              account.sharedFolderId = sharedFolderId;
-              await this.updateSharedFolderId(account.id, sharedFolderId);
-            }
+      // Open popup window for authorization
+      const popup = window.open(
+        authUrl.toString(),
+        'google-auth',
+        'width=500,height=600,scrollbars=yes,resizable=yes'
+      );
+
+      return new Promise((resolve, reject) => {
+        const checkClosed = setInterval(() => {
+          if (popup?.closed) {
+            clearInterval(checkClosed);
+            reject(new Error('Authorization cancelled'));
           }
+        }, 1000);
+
+        // Listen for authorization code from popup
+        const messageListener = async (event: MessageEvent) => {
+          if (event.origin !== window.location.origin) return;
           
-          resolve(account);
-        } catch (error) {
-          reject(error);
+          if (event.data.type === 'GOOGLE_AUTH_SUCCESS') {
+            clearInterval(checkClosed);
+            window.removeEventListener('message', messageListener);
+            popup?.close();
+
+            try {
+              const authCode = event.data.code;
+              const account = await this.exchangeCodeForTokens(authCode);
+              resolve(account);
+            } catch (error) {
+              reject(error);
+            }
+          } else if (event.data.type === 'GOOGLE_AUTH_ERROR') {
+            clearInterval(checkClosed);
+            window.removeEventListener('message', messageListener);
+            popup?.close();
+            reject(new Error(event.data.error));
+          }
+        };
+
+        window.addEventListener('message', messageListener);
+      });
+    } catch (error) {
+      throw new Error(`Authentication failed: ${error}`);
+    }
+  }
+
+  private async exchangeCodeForTokens(authCode: string): Promise<GoogleAccount> {
+    try {
+      // Exchange authorization code for tokens
+      const redirectUri = this.getRedirectUri();
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: GOOGLE_CLIENT_ID,
+          code: authCode,
+          code_verifier: this.codeVerifier,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        throw new Error('Failed to exchange code for tokens');
+      }
+
+      const tokens = await tokenResponse.json();
+      
+      // Get user profile information
+      const profileResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: {
+          'Authorization': `Bearer ${tokens.access_token}`,
+        },
+      });
+
+      if (!profileResponse.ok) {
+        throw new Error('Failed to get user profile');
+      }
+
+      const profile = await profileResponse.json();
+
+      // Get storage info from Drive API
+      const storageInfo = await this.getStorageInfo(tokens.access_token);
+
+      // Check if this is the first account (will be primary)
+      const existingAccounts = await this.getConnectedAccounts();
+      const accountType = existingAccounts.length === 0 ? 'primary' : 'backup';
+
+      const account: GoogleAccount = {
+        id: profile.id,
+        email: profile.email,
+        name: profile.name,
+        avatar: profile.picture,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token || '',
+        totalStorage: storageInfo.limit,
+        usedStorage: storageInfo.usage,
+        connectedAt: new Date(),
+        accountType
+      };
+
+      // Store in Supabase
+      await this.storeAccountInDatabase(account, tokens.expires_in);
+
+      // If this is a backup account, create shared folder and set permissions
+      if (accountType === 'backup') {
+        const primaryAccount = existingAccounts.find(acc => acc.accountType === 'primary');
+        if (primaryAccount) {
+          const sharedFolderId = await this.createSharedFolder(account, primaryAccount);
+          account.sharedFolderId = sharedFolderId;
+          await this.updateSharedFolderId(account.id, sharedFolderId);
         }
-      }).catch(reject);
-    });
+      }
+
+      return account;
+    } catch (error) {
+      throw new Error(`Token exchange failed: ${error}`);
+    }
   }
 
   private async getStorageInfo(accessToken: string) {
@@ -159,9 +211,11 @@ export class GoogleAuthService {
     }
   }
 
-  private async storeAccountInDatabase(account: GoogleAccount) {
+  private async storeAccountInDatabase(account: GoogleAccount, expiresIn: number = 3600) {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('User not authenticated');
+
+    const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
     const { error } = await supabase
       .from('google_accounts')
@@ -173,7 +227,7 @@ export class GoogleAuthService {
         avatar_url: account.avatar,
         access_token: account.accessToken,
         refresh_token: account.refreshToken,
-        token_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(), // 1 hour from now
+        token_expires_at: expiresAt.toISOString(),
         total_storage: account.totalStorage,
         used_storage: account.usedStorage,
         connected_at: account.connectedAt.toISOString(),
@@ -211,29 +265,35 @@ export class GoogleAuthService {
     }));
   }
 
-  private async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; expiresAt: Date }> {
-    const response = await fetch('https://oauth2.googleapis.com/token', {
+  private async refreshAccessToken(refreshToken: string, accountId: string): Promise<{ accessToken: string; expiresAt: Date }> {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      throw new Error('User not authenticated');
+    }
+
+    const response = await fetch('https://zxxcowhyrhlgkfhtsxre.supabase.co/functions/v1/refresh-google-token', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
       },
-      body: new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token'
+      body: JSON.stringify({
+        refreshToken,
+        accountId
       })
     });
 
     if (!response.ok) {
-      throw new Error('Failed to refresh access token');
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to refresh access token');
     }
 
     const data = await response.json();
-    const expiresAt = new Date(Date.now() + (data.expires_in * 1000));
     
     return {
-      accessToken: data.access_token,
-      expiresAt
+      accessToken: data.accessToken,
+      expiresAt: new Date(data.expiresAt)
     };
   }
 
@@ -277,8 +337,7 @@ export class GoogleAuthService {
     // Check if token is expired or about to expire
     if (this.isTokenExpired(account.token_expires_at)) {
       try {
-        const { accessToken, expiresAt } = await this.refreshAccessToken(account.refresh_token);
-        await this.updateTokenInDatabase(accountId, accessToken, expiresAt);
+        const { accessToken, expiresAt } = await this.refreshAccessToken(account.refresh_token, accountId);
         return accessToken;
       } catch (error) {
         console.error('Failed to refresh token:', error);
