@@ -211,6 +211,90 @@ export class GoogleAuthService {
     }));
   }
 
+  private async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; expiresAt: Date }> {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token'
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to refresh access token');
+    }
+
+    const data = await response.json();
+    const expiresAt = new Date(Date.now() + (data.expires_in * 1000));
+    
+    return {
+      accessToken: data.access_token,
+      expiresAt
+    };
+  }
+
+  private async updateTokenInDatabase(accountId: string, accessToken: string, expiresAt: Date): Promise<void> {
+    const { data: user } = await supabase.auth.getUser();
+    if (!user.user) throw new Error('User not authenticated');
+
+    const { error } = await supabase
+      .from('google_accounts')
+      .update({
+        access_token: accessToken,
+        token_expires_at: expiresAt.toISOString()
+      })
+      .eq('user_id', user.user.id)
+      .eq('google_account_id', accountId);
+
+    if (error) throw error;
+  }
+
+  private isTokenExpired(expiresAt: string): boolean {
+    const expiry = new Date(expiresAt);
+    const now = new Date();
+    // Check if token expires within the next 5 minutes
+    const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+    return expiry <= fiveMinutesFromNow;
+  }
+
+  async ensureValidToken(accountId: string): Promise<string> {
+    const { data: user } = await supabase.auth.getUser();
+    if (!user.user) throw new Error('User not authenticated');
+
+    const { data: account, error } = await supabase
+      .from('google_accounts')
+      .select('*')
+      .eq('user_id', user.user.id)
+      .eq('google_account_id', accountId)
+      .single();
+
+    if (error || !account) throw new Error('Account not found');
+
+    // Check if token is expired or about to expire
+    if (this.isTokenExpired(account.token_expires_at)) {
+      try {
+        const { accessToken, expiresAt } = await this.refreshAccessToken(account.refresh_token);
+        await this.updateTokenInDatabase(accountId, accessToken, expiresAt);
+        return accessToken;
+      } catch (error) {
+        console.error('Failed to refresh token:', error);
+        // Mark account as expired
+        await supabase
+          .from('google_accounts')
+          .update({ status: 'expired' })
+          .eq('user_id', user.user.id)
+          .eq('google_account_id', accountId);
+        throw new Error('Token refresh failed. Please reconnect your account.');
+      }
+    }
+
+    return account.access_token;
+  }
+
   async removeAccount(accountId: string): Promise<void> {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('User not authenticated');

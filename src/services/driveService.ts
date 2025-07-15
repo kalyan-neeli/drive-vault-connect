@@ -1,5 +1,6 @@
 
 import { supabase } from '@/integrations/supabase/client';
+import { GoogleAuthService } from './googleAuth';
 
 export interface DriveFile {
   id: string;
@@ -14,14 +15,19 @@ export interface DriveFile {
 }
 
 export class DriveService {
+  private authService = new GoogleAuthService();
+
   async getFiles(accountId: string, folderId?: string): Promise<DriveFile[]> {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('User not authenticated');
 
-    // First get the account details to get the access token
+    // Get valid access token (will refresh if needed)
+    const accessToken = await this.authService.ensureValidToken(accountId);
+
+    // Get account details
     const { data: account, error: accountError } = await supabase
       .from('google_accounts')
-      .select('access_token, account_type, shared_folder_id')
+      .select('account_type, shared_folder_id')
       .eq('user_id', user.user.id)
       .eq('google_account_id', accountId)
       .single();
@@ -40,7 +46,7 @@ export class DriveService {
     try {
       const response = await fetch(query, {
         headers: {
-          'Authorization': `Bearer ${account.access_token}`
+          'Authorization': `Bearer ${accessToken}`
         }
       });
 
@@ -144,9 +150,12 @@ export class DriveService {
       accountId = await this.selectBestBackupAccount();
     }
 
+    // Get valid access token (will refresh if needed)
+    const accessToken = await this.authService.ensureValidToken(accountId);
+
     const { data: account, error } = await supabase
       .from('google_accounts')
-      .select('access_token, account_type, shared_folder_id')
+      .select('account_type, shared_folder_id')
       .eq('google_account_id', accountId)
       .single();
 
@@ -176,7 +185,7 @@ export class DriveService {
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${account.access_token}`
+          'Authorization': `Bearer ${accessToken}`
         },
         body: form
       }
@@ -247,30 +256,28 @@ export class DriveService {
       targetAccountId = await this.selectBestBackupAccount();
     }
 
-    const { data: sourceAccount } = await supabase
-      .from('google_accounts')
-      .select('access_token')
-      .eq('google_account_id', sourceAccountId)
-      .single();
+    // Get valid access tokens (will refresh if needed)
+    const sourceAccessToken = await this.authService.ensureValidToken(sourceAccountId);
+    const targetAccessToken = await this.authService.ensureValidToken(targetAccountId);
 
     const { data: targetAccount } = await supabase
       .from('google_accounts')
-      .select('access_token, shared_folder_id')
+      .select('shared_folder_id')
       .eq('google_account_id', targetAccountId)
       .single();
 
-    if (!sourceAccount || !targetAccount) throw new Error('Account not found');
+    if (!targetAccount) throw new Error('Target account not found');
 
     // Get file metadata from source
     const fileResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType,parents`, {
-      headers: { 'Authorization': `Bearer ${sourceAccount.access_token}` }
+      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
     });
     
     const fileMetadata = await fileResponse.json();
 
     // Download file content
     const downloadResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: { 'Authorization': `Bearer ${sourceAccount.access_token}` }
+      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
     });
     
     const fileBlob = await downloadResponse.blob();
@@ -280,8 +287,8 @@ export class DriveService {
     if (maintainPath && fileMetadata.parents) {
       targetFolderId = await this.recreateFolderStructure(
         fileMetadata.parents[0], 
-        sourceAccount.access_token, 
-        targetAccount.access_token,
+        sourceAccessToken, 
+        targetAccessToken,
         targetAccount.shared_folder_id
       );
     }
@@ -304,7 +311,7 @@ export class DriveService {
       'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
       {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${targetAccount.access_token}` },
+        headers: { 'Authorization': `Bearer ${targetAccessToken}` },
         body: form
       }
     );
@@ -316,7 +323,7 @@ export class DriveService {
     // Delete from source account
     await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${sourceAccount.access_token}` }
+      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
     });
   }
 
