@@ -1,4 +1,3 @@
-
 import { supabase } from '@/integrations/supabase/client';
 import { GoogleAuthService } from './googleAuth';
 
@@ -12,6 +11,8 @@ export interface DriveFile {
   accountId: string;
   downloadUrl?: string;
   thumbnailUrl?: string;
+  parentId?: string;
+  path?: string;
 }
 
 export class DriveService {
@@ -34,10 +35,32 @@ export class DriveService {
 
     if (accountError) throw accountError;
 
+    // For primary accounts, exclude shared folders created for backup accounts
     // For backup accounts, only show files from shared folder
-    let query = 'https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink,thumbnailLink)';
+    let query = 'https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink,thumbnailLink,parents)';
+    
     if (account.account_type === 'backup' && account.shared_folder_id) {
+      // For backup accounts, only show files from shared folder
       query += `&q='${account.shared_folder_id}' in parents`;
+    } else if (account.account_type === 'primary') {
+      // For primary accounts, exclude files that are in shared folders created for backups
+      const { data: backupAccounts } = await supabase
+        .from('google_accounts')
+        .select('shared_folder_id')
+        .eq('user_id', user.user.id)
+        .eq('account_type', 'backup')
+        .not('shared_folder_id', 'is', null);
+
+      if (backupAccounts && backupAccounts.length > 0) {
+        const excludeFolders = backupAccounts
+          .map(acc => `'${acc.shared_folder_id}' in parents`)
+          .join(' or ');
+        query += `&q=not (${excludeFolders})`;
+      }
+      
+      if (folderId) {
+        query += ` and '${folderId}' in parents`;
+      }
     } else if (folderId) {
       query += `&q='${folderId}' in parents`;
     }
@@ -65,7 +88,8 @@ export class DriveService {
         modifiedTime: file.modifiedTime,
         accountId: accountId,
         downloadUrl: file.webViewLink,
-        thumbnailUrl: file.thumbnailLink
+        thumbnailUrl: file.thumbnailLink,
+        parentId: file.parents?.[0]
       }));
 
       // Store files in database for caching
@@ -77,6 +101,233 @@ export class DriveService {
       // Fallback to cached files from database
       return this.getCachedFiles(accountId);
     }
+  }
+
+  async createFolder(name: string, accountId: string, parentFolderId?: string): Promise<string> {
+    const accessToken = await this.authService.ensureValidToken(accountId);
+
+    const { data: account } = await supabase
+      .from('google_accounts')
+      .select('account_type, shared_folder_id')
+      .eq('google_account_id', accountId)
+      .single();
+
+    let targetParentId = parentFolderId;
+    
+    // For backup accounts, create folders in shared folder if no parent specified
+    if (account?.account_type === 'backup' && account.shared_folder_id && !parentFolderId) {
+      targetParentId = account.shared_folder_id;
+    }
+
+    const metadata: any = {
+      name: name,
+      mimeType: 'application/vnd.google-apps.folder'
+    };
+
+    if (targetParentId) {
+      metadata.parents = [targetParentId];
+    }
+
+    const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(metadata)
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to create folder');
+    }
+
+    const folder = await response.json();
+    return folder.id;
+  }
+
+  async deleteFile(fileId: string, accountId: string): Promise<void> {
+    const accessToken = await this.authService.ensureValidToken(accountId);
+
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to delete file');
+    }
+  }
+
+  async deleteFolder(folderId: string, accountId: string): Promise<void> {
+    const accessToken = await this.authService.ensureValidToken(accountId);
+
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to delete folder');
+    }
+  }
+
+  async moveFileWithPath(fileId: string, sourceAccountId: string, targetAccountId: string, targetFolderId: string, maintainPath: boolean = true): Promise<void> {
+    const sourceAccessToken = await this.authService.ensureValidToken(sourceAccountId);
+    const targetAccessToken = await this.authService.ensureValidToken(targetAccountId);
+
+    // Get file metadata from source
+    const fileResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType,parents`, {
+      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
+    });
+    
+    const fileMetadata = await fileResponse.json();
+
+    // Download file content
+    const downloadResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
+    });
+    
+    const fileBlob = await downloadResponse.blob();
+
+    // Create folder path in target if maintainPath is true
+    let finalTargetFolderId = targetFolderId;
+    if (maintainPath && fileMetadata.parents) {
+      finalTargetFolderId = await this.recreateFolderPath(
+        fileMetadata.parents[0], 
+        sourceAccessToken, 
+        targetAccessToken,
+        targetFolderId,
+        sourceAccountId,
+        targetAccountId
+      );
+    }
+
+    // Check for duplicate names in target folder
+    await this.ensureUniqueFileName(fileMetadata.name, finalTargetFolderId, targetAccessToken);
+
+    // Upload to target account
+    const uploadMetadata: any = {
+      name: fileMetadata.name,
+      mimeType: fileMetadata.mimeType,
+      parents: [finalTargetFolderId]
+    };
+
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(uploadMetadata)], { type: 'application/json' }));
+    form.append('file', fileBlob);
+
+    const uploadResponse = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${targetAccessToken}` },
+        body: form
+      }
+    );
+
+    if (!uploadResponse.ok) {
+      throw new Error('Failed to upload file to backup account');
+    }
+
+    // Delete from source account
+    await this.deleteFile(fileId, sourceAccountId);
+  }
+
+  private async recreateFolderPath(
+    sourceFolderId: string,
+    sourceToken: string,
+    targetToken: string,
+    rootTargetFolder: string,
+    sourceAccountId: string,
+    targetAccountId: string
+  ): Promise<string> {
+    // Get folder path from source
+    const folderPath = await this.getFolderPath(sourceFolderId, sourceToken);
+    
+    let currentTargetFolder = rootTargetFolder;
+    
+    // Create folder structure in target
+    for (const folderName of folderPath) {
+      const existingFolderId = await this.findFolderByName(folderName, currentTargetFolder, targetToken);
+      
+      if (existingFolderId) {
+        currentTargetFolder = existingFolderId;
+      } else {
+        currentTargetFolder = await this.createFolderInParent(folderName, currentTargetFolder, targetToken);
+      }
+    }
+    
+    return currentTargetFolder;
+  }
+
+  private async getFolderPath(folderId: string, accessToken: string): Promise<string[]> {
+    const path: string[] = [];
+    let currentFolderId = folderId;
+    
+    while (currentFolderId) {
+      const response = await fetch(`https://www.googleapis.com/drive/v3/files/${currentFolderId}?fields=name,parents`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      
+      const folderData = await response.json();
+      path.unshift(folderData.name);
+      
+      currentFolderId = folderData.parents?.[0];
+      
+      // Stop if we reach root or a shared folder
+      if (!currentFolderId || currentFolderId === 'root') break;
+    }
+    
+    return path;
+  }
+
+  private async findFolderByName(name: string, parentId: string, accessToken: string): Promise<string | null> {
+    const query = `name='${name}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder'`;
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    
+    const data = await response.json();
+    return data.files.length > 0 ? data.files[0].id : null;
+  }
+
+  private async createFolderInParent(name: string, parentId: string, accessToken: string): Promise<string> {
+    const metadata = {
+      name: name,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId]
+    };
+
+    const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(metadata)
+    });
+
+    const folder = await response.json();
+    return folder.id;
+  }
+
+  private async ensureUniqueFileName(fileName: string, parentFolderId: string, accessToken: string): Promise<string> {
+    const query = `name='${fileName}' and '${parentFolderId}' in parents`;
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    
+    const data = await response.json();
+    
+    if (data.files.length > 0) {
+      throw new Error(`A file with the name "${fileName}" already exists in the target folder`);
+    }
+    
+    return fileName;
   }
 
   private async syncFilesToDatabase(files: DriveFile[], accountId: string) {
@@ -256,108 +507,15 @@ export class DriveService {
       targetAccountId = await this.selectBestBackupAccount();
     }
 
-    // Get valid access tokens (will refresh if needed)
-    const sourceAccessToken = await this.authService.ensureValidToken(sourceAccountId);
-    const targetAccessToken = await this.authService.ensureValidToken(targetAccountId);
-
     const { data: targetAccount } = await supabase
       .from('google_accounts')
       .select('shared_folder_id')
       .eq('google_account_id', targetAccountId)
       .single();
 
-    if (!targetAccount) throw new Error('Target account not found');
+    if (!targetAccount?.shared_folder_id) throw new Error('Target account shared folder not found');
 
-    // Get file metadata from source
-    const fileResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType,parents`, {
-      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
-    });
-    
-    const fileMetadata = await fileResponse.json();
-
-    // Download file content
-    const downloadResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
-    });
-    
-    const fileBlob = await downloadResponse.blob();
-
-    // Create folder structure in backup if needed
-    let targetFolderId = targetAccount.shared_folder_id;
-    if (maintainPath && fileMetadata.parents) {
-      targetFolderId = await this.recreateFolderStructure(
-        fileMetadata.parents[0], 
-        sourceAccessToken, 
-        targetAccessToken,
-        targetAccount.shared_folder_id
-      );
-    }
-
-    // Upload to target account
-    const uploadMetadata: any = {
-      name: fileMetadata.name,
-      mimeType: fileMetadata.mimeType
-    };
-
-    if (targetFolderId) {
-      uploadMetadata.parents = [targetFolderId];
-    }
-
-    const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(uploadMetadata)], { type: 'application/json' }));
-    form.append('file', fileBlob);
-
-    const uploadResponse = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${targetAccessToken}` },
-        body: form
-      }
-    );
-
-    if (!uploadResponse.ok) {
-      throw new Error('Failed to upload file to backup account');
-    }
-
-    // Delete from source account
-    await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
-    });
-  }
-
-  private async recreateFolderStructure(
-    parentFolderId: string, 
-    sourceToken: string, 
-    targetToken: string, 
-    rootTargetFolder: string
-  ): Promise<string> {
-    // Get parent folder path from source
-    const folderResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${parentFolderId}?fields=name,parents`, {
-      headers: { 'Authorization': `Bearer ${sourceToken}` }
-    });
-    
-    const folderData = await folderResponse.json();
-    
-    // Create folder in target account under shared folder
-    const folderMetadata = {
-      name: folderData.name,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [rootTargetFolder]
-    };
-
-    const createResponse = await fetch('https://www.googleapis.com/drive/v3/files', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${targetToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(folderMetadata)
-    });
-
-    const newFolder = await createResponse.json();
-    return newFolder.id;
+    await this.moveFileWithPath(fileId, sourceAccountId, targetAccountId, targetAccount.shared_folder_id, maintainPath);
   }
 
   async checkStorageAndAutoMove(primaryAccountId: string): Promise<void> {
