@@ -1,4 +1,3 @@
-
 import { supabase } from '@/integrations/supabase/client';
 
 const GOOGLE_CLIENT_ID = 'afasj,gnsdkjgbndts.apps.googleusercontent.com';
@@ -250,7 +249,7 @@ export class GoogleAuthService {
 
     if (error) throw error;
 
-    return data.map(account => ({
+    const accounts = data.map(account => ({
       id: account.google_account_id,
       email: account.email,
       name: account.name,
@@ -263,6 +262,18 @@ export class GoogleAuthService {
       accountType: account.account_type as 'primary' | 'backup',
       sharedFolderId: account.shared_folder_id
     }));
+
+    // Validate and refresh tokens for all accounts
+    for (const account of accounts) {
+      try {
+        const validToken = await this.ensureValidToken(account.id);
+        account.accessToken = validToken;
+      } catch (error) {
+        console.error(`Failed to refresh token for account ${account.email}:`, error);
+      }
+    }
+
+    return accounts;
   }
 
   private async refreshAccessToken(refreshToken: string, accountId: string): Promise<{ accessToken: string; expiresAt: Date }> {
@@ -316,7 +327,6 @@ export class GoogleAuthService {
   private isTokenExpired(expiresAt: string): boolean {
     const expiry = new Date(expiresAt);
     const now = new Date();
-    // Check if token expires within the next 5 minutes
     const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
     return expiry <= fiveMinutesFromNow;
   }
@@ -337,7 +347,10 @@ export class GoogleAuthService {
     // Check if token is expired or about to expire
     if (this.isTokenExpired(account.token_expires_at)) {
       try {
+        console.log(`Token expired for account ${accountId}, refreshing...`);
         const { accessToken, expiresAt } = await this.refreshAccessToken(account.refresh_token, accountId);
+        await this.updateTokenInDatabase(accountId, accessToken, expiresAt);
+        console.log(`Token refreshed successfully for account ${accountId}`);
         return accessToken;
       } catch (error) {
         console.error('Failed to refresh token:', error);
@@ -370,13 +383,11 @@ export class GoogleAuthService {
   private async createSharedFolder(backupAccount: GoogleAccount, primaryAccount: GoogleAccount): Promise<string> {
     const folderName = `shared_${primaryAccount.email}`;
     
-    // First check if shared folder already exists
     const existingFolderId = await this.findExistingSharedFolder(backupAccount.accessToken, folderName, primaryAccount.email);
     if (existingFolderId) {
       return existingFolderId;
     }
 
-    // Create folder in backup account
     const folderMetadata = {
       name: folderName,
       mimeType: 'application/vnd.google-apps.folder'
@@ -397,7 +408,6 @@ export class GoogleAuthService {
 
     const folder = await createResponse.json();
     
-    // Share the folder with primary account
     const permission = {
       role: 'writer',
       type: 'user',
@@ -422,7 +432,6 @@ export class GoogleAuthService {
 
   private async findExistingSharedFolder(accessToken: string, folderName: string, primaryEmail: string): Promise<string | null> {
     try {
-      // Search for folders with the expected name
       const searchResponse = await fetch(
         `https://www.googleapis.com/drive/v3/files?q=name='${folderName}' and mimeType='application/vnd.google-apps.folder'&fields=files(id,name)`,
         {
@@ -433,7 +442,6 @@ export class GoogleAuthService {
       const searchData = await searchResponse.json();
       
       if (searchData.files && searchData.files.length > 0) {
-        // Check if the folder is shared with the primary account
         for (const folder of searchData.files) {
           const permissionsResponse = await fetch(
             `https://www.googleapis.com/drive/v3/files/${folder.id}/permissions`,
@@ -476,13 +484,11 @@ export class GoogleAuthService {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('User not authenticated');
 
-    // First, set all accounts to backup
     await supabase
       .from('google_accounts')
       .update({ account_type: 'backup' })
       .eq('user_id', user.user.id);
 
-    // Then set the selected account as primary
     const { error } = await supabase
       .from('google_accounts')
       .update({ account_type: 'primary' })

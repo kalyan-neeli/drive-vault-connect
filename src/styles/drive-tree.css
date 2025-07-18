@@ -1,0 +1,87 @@
+
+/* DriveTree specific styles */
+.drive-tree-card {
+  @apply h-full card-responsive;
+}
+
+.drive-tree-header {
+  @apply pb-2;
+}
+
+.drive-tree-header-content {
+  @apply flex items-center justify-between;
+}
+
+.drive-tree-title {
+  @apply text-sm font-medium truncate;
+}
+
+.drive-tree-actions {
+  @apply flex gap-1;
+}
+
+.drive-tree-content {
+  @apply pt-0 tree-container;
+}
+
+.drive-tree-empty {
+  @apply text-center text-gray-500 py-6 sm:py-8;
+}
+
+.drive-tree-nodes {
+  @apply space-y-1;
+}
+
+.drive-tree-node {
+  @apply tree-node group;
+}
+
+.drive-tree-node-selected {
+  @apply tree-node-selected;
+}
+
+.drive-tree-node-content {
+  @apply flex items-center gap-2 flex-1 min-w-0;
+}
+
+.drive-tree-node-icon {
+  @apply flex-shrink-0;
+}
+
+.drive-tree-node-name {
+  @apply flex-1 truncate;
+}
+
+.drive-tree-node-size {
+  @apply text-xs text-gray-500 flex-shrink-0;
+}
+
+.drive-tree-node-actions {
+  @apply tree-actions;
+}
+
+.drive-tree-expand-button {
+  @apply p-0 h-4 w-4 flex-shrink-0;
+}
+
+.drive-tree-action-button {
+  @apply p-1 h-6 w-6 flex-shrink-0;
+}
+
+.drive-tree-children {
+  @apply ml-4 sm:ml-6;
+}
+
+/* Drag and drop styles */
+.drag-over {
+  @apply bg-blue-100 border-blue-300;
+}
+
+.dragging {
+  @apply opacity-50;
+}
+
+/* File thumbnail in tree */
+.tree-file-thumbnail {
+  @apply w-4 h-4 object-cover rounded flex-shrink-0;
+}

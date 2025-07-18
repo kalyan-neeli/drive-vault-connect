@@ -1,20 +1,21 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatBytes } from "@/utils/formatBytes";
 import { useToast } from "@/hooks/use-toast";
 import { DriveService, DriveFile } from "@/services/driveService";
-import { GoogleAccount } from "@/services/googleAuth";
-import { Folder, File, Plus, Trash2, FolderPlus, ChevronRight, ChevronDown } from "lucide-react";
+import { GoogleAccount, GoogleAuthService } from "@/services/googleAuth";
+import { Folder, File, Plus, Trash2, FolderPlus, ChevronRight, ChevronDown, Eye } from "lucide-react";
+import "../styles/drive-tree.css";
 
 interface DriveTreeProps {
   account: GoogleAccount;
   isBackup?: boolean;
   onFileMove?: (fileId: string, targetFolderId: string, targetAccountId: string) => void;
   onRefresh?: () => void;
+  onFilePreview?: (file: DriveFile) => void;
 }
 
 interface TreeNode {
@@ -28,9 +29,11 @@ interface TreeNode {
   expanded?: boolean;
   path: string;
   parentId?: string;
+  thumbnailUrl?: string;
+  downloadUrl?: string;
 }
 
-export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: DriveTreeProps) => {
+export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh, onFilePreview }: DriveTreeProps) => {
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -39,6 +42,7 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
   const [createParentId, setCreateParentId] = useState<string | null>(null);
   const { toast } = useToast();
   const [driveService] = useState(new DriveService());
+  const [googleAuth] = useState(new GoogleAuthService());
 
   useEffect(() => {
     loadTreeData();
@@ -47,6 +51,9 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
   const loadTreeData = async () => {
     setLoading(true);
     try {
+      // Ensure valid token before making API calls
+      await googleAuth.ensureValidToken(account.id);
+      
       const files = await driveService.getFiles(account.id);
       const tree = buildFileTree(files);
       setTreeData(tree);
@@ -66,7 +73,6 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
     const nodeMap = new Map<string, TreeNode>();
     const rootNodes: TreeNode[] = [];
 
-    // Create nodes for all files and folders
     files.forEach(file => {
       const node: TreeNode = {
         id: file.id,
@@ -78,12 +84,13 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
         children: [],
         expanded: false,
         path: file.name,
-        parentId: file.parentId
+        parentId: file.parentId,
+        thumbnailUrl: file.thumbnailUrl,
+        downloadUrl: file.downloadUrl
       };
       nodeMap.set(file.id, node);
     });
 
-    // Build hierarchy
     nodeMap.forEach(node => {
       if (node.parentId && nodeMap.has(node.parentId)) {
         const parent = nodeMap.get(node.parentId)!;
@@ -95,7 +102,6 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
       }
     });
 
-    // Sort nodes: folders first, then files
     const sortNodes = (nodes: TreeNode[]) => {
       return nodes.sort((a, b) => {
         if (a.type !== b.type) {
@@ -135,7 +141,6 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return;
 
-    // Check for duplicate names
     const parentNode = findNodeById(createParentId || 'root');
     const siblings = parentNode?.children || treeData;
     const isDuplicate = siblings.some(child => 
@@ -152,6 +157,7 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
     }
 
     try {
+      await googleAuth.ensureValidToken(account.id);
       await driveService.createFolder(newFolderName, account.id, createParentId);
       setNewFolderName("");
       setShowCreateDialog(false);
@@ -173,6 +179,7 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
 
   const handleDelete = async (nodeId: string, isFolder: boolean) => {
     try {
+      await googleAuth.ensureValidToken(account.id);
       if (isFolder) {
         await driveService.deleteFolder(nodeId, account.id);
       } else {
@@ -233,16 +240,30 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
     }
   };
 
+  const handleFilePreview = (node: TreeNode) => {
+    if (onFilePreview && node.type === 'file') {
+      const driveFile: DriveFile = {
+        id: node.id,
+        name: node.name,
+        mimeType: node.mimeType,
+        size: node.size,
+        modifiedTime: node.modifiedTime,
+        parentId: node.parentId,
+        thumbnailUrl: node.thumbnailUrl,
+        downloadUrl: node.downloadUrl
+      };
+      onFilePreview(driveFile);
+    }
+  };
+
   const renderNode = (node: TreeNode, level: number = 0): React.ReactNode => {
     const isSelected = selectedNode === node.id;
-    const paddingLeft = `${level * 20 + 8}px`;
+    const paddingLeft = `${level * 16 + 8}px`;
 
     return (
       <div key={node.id}>
         <div
-          className={`flex items-center gap-2 py-1 px-2 hover:bg-gray-50 cursor-pointer ${
-            isSelected ? 'bg-blue-50 border-l-2 border-blue-500' : ''
-          }`}
+          className={`drive-tree-node ${isSelected ? 'drive-tree-node-selected' : ''}`}
           style={{ paddingLeft }}
           onClick={() => setSelectedNode(node.id)}
           draggable={node.type === 'file' || !isBackup}
@@ -250,38 +271,62 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
           onDragOver={node.type === 'folder' ? handleDragOver : undefined}
           onDrop={node.type === 'folder' ? (e) => handleDrop(e, node.id) : undefined}
         >
-          {node.type === 'folder' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="p-0 h-4 w-4"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleNode(node.id);
-              }}
-            >
-              {node.expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            </Button>
-          )}
-          
-          {node.type === 'folder' ? (
-            <Folder className="h-4 w-4 text-blue-600" />
-          ) : (
-            <File className="h-4 w-4 text-gray-600" />
-          )}
-          
-          <span className="flex-1 text-sm truncate">{node.name}</span>
-          
-          {node.type === 'file' && (
-            <span className="text-xs text-gray-500">{formatBytes(node.size || 0)}</span>
-          )}
-          
-          <div className="flex gap-1">
+          <div className="drive-tree-node-content">
             {node.type === 'folder' && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="p-1 h-6 w-6"
+                className="drive-tree-expand-button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleNode(node.id);
+                }}
+              >
+                {node.expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </Button>
+            )}
+            
+            <div className="drive-tree-node-icon">
+              {node.type === 'folder' ? (
+                <Folder className="h-4 w-4 text-blue-600" />
+              ) : node.thumbnailUrl ? (
+                <img 
+                  src={node.thumbnailUrl} 
+                  alt={node.name}
+                  className="tree-file-thumbnail"
+                />
+              ) : (
+                <File className="h-4 w-4 text-gray-600" />
+              )}
+            </div>
+            
+            <span className="drive-tree-node-name">{node.name}</span>
+            
+            {node.type === 'file' && (
+              <span className="drive-tree-node-size">{formatBytes(node.size || 0)}</span>
+            )}
+          </div>
+          
+          <div className="drive-tree-node-actions">
+            {node.type === 'file' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="drive-tree-action-button text-blue-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleFilePreview(node);
+                }}
+              >
+                <Eye className="h-3 w-3" />
+              </Button>
+            )}
+            
+            {node.type === 'folder' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="drive-tree-action-button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setCreateParentId(node.id);
@@ -295,7 +340,7 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
             <Button
               variant="ghost"
               size="sm"
-              className="p-1 h-6 w-6 text-red-600 hover:text-red-800"
+              className="drive-tree-action-button text-red-600 hover:text-red-800"
               onClick={(e) => {
                 e.stopPropagation();
                 handleDelete(node.id, node.type === 'folder');
@@ -307,7 +352,7 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
         </div>
         
         {node.type === 'folder' && node.expanded && node.children && (
-          <div>
+          <div className="drive-tree-children">
             {node.children.map(child => renderNode(child, level + 1))}
           </div>
         )}
@@ -317,11 +362,11 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
 
   if (loading) {
     return (
-      <Card>
+      <Card className="drive-tree-card">
         <CardContent className="pt-6">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p>Loading files...</p>
+            <div className="animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-sm">Loading files...</p>
           </div>
         </CardContent>
       </Card>
@@ -329,13 +374,13 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
   }
 
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm">
+    <Card className="drive-tree-card">
+      <CardHeader className="drive-tree-header">
+        <div className="drive-tree-header-content">
+          <CardTitle className="drive-tree-title">
             {account.email} ({isBackup ? 'Backup' : 'Primary'})
           </CardTitle>
-          <div className="flex gap-1">
+          <div className="drive-tree-actions">
             <Button
               variant="ghost"
               size="sm"
@@ -350,13 +395,13 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh }: 
         </div>
       </CardHeader>
       
-      <CardContent className="pt-0 h-96 overflow-y-auto">
+      <CardContent className="drive-tree-content">
         {treeData.length === 0 ? (
-          <div className="text-center text-gray-500 py-8">
+          <div className="drive-tree-empty">
             No files found
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="drive-tree-nodes">
             {treeData.map(node => renderNode(node))}
           </div>
         )}
