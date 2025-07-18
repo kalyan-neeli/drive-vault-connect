@@ -1,70 +1,84 @@
 
 /* Common responsive utilities and styles */
-@import url('@/index.css');
 
 /* Container and layout utilities */
-.container-responsive {
-  @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
-}
+@layer components {
+  .container-responsive {
+    @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
 
-.grid-responsive {
-  @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6;
-}
+  .grid-responsive {
+    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6;
+  }
 
-.flex-responsive {
-  @apply flex flex-col sm:flex-row gap-4 sm:gap-6;
-}
+  .flex-responsive {
+    @apply flex flex-col sm:flex-row gap-4 sm:gap-6;
+  }
 
-/* Card responsive styles */
-.card-responsive {
-  @apply w-full min-h-0 overflow-hidden;
-}
+  /* Card responsive styles */
+  .card-responsive {
+    @apply w-full min-h-0 overflow-hidden;
+  }
 
-.card-content-responsive {
-  @apply p-4 sm:p-6 overflow-y-auto;
-}
+  .card-content-responsive {
+    @apply p-4 sm:p-6 overflow-y-auto;
+  }
 
-/* Button responsive styles */
-.button-responsive {
-  @apply px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base;
-}
+  /* Button responsive styles */
+  .button-responsive {
+    @apply px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base;
+  }
 
-.button-group-responsive {
-  @apply flex flex-col sm:flex-row gap-2 sm:gap-4;
-}
+  .button-group-responsive {
+    @apply flex flex-col sm:flex-row gap-2 sm:gap-4;
+  }
 
-/* Text responsive styles */
-.text-responsive-sm {
-  @apply text-xs sm:text-sm;
-}
+  /* Text responsive styles */
+  .text-responsive-sm {
+    @apply text-xs sm:text-sm;
+  }
 
-.text-responsive-base {
-  @apply text-sm sm:text-base;
-}
+  .text-responsive-base {
+    @apply text-sm sm:text-base;
+  }
 
-.text-responsive-lg {
-  @apply text-lg sm:text-xl lg:text-2xl;
-}
+  .text-responsive-lg {
+    @apply text-lg sm:text-xl lg:text-2xl;
+  }
 
-.text-responsive-xl {
-  @apply text-xl sm:text-2xl lg:text-3xl;
-}
+  .text-responsive-xl {
+    @apply text-xl sm:text-2xl lg:text-3xl;
+  }
 
-/* Tree view responsive styles */
-.tree-container {
-  @apply h-64 sm:h-80 lg:h-96 overflow-y-auto;
-}
+  /* Tree view responsive styles */
+  .tree-container {
+    @apply h-64 sm:h-80 lg:h-96 overflow-y-auto;
+  }
 
-.tree-node {
-  @apply flex items-center gap-1 sm:gap-2 py-1 px-2 hover:bg-gray-50 cursor-pointer text-sm;
-}
+  .tree-node {
+    @apply flex items-center gap-1 sm:gap-2 py-1 px-2 hover:bg-gray-50 cursor-pointer text-sm;
+  }
 
-.tree-node-selected {
-  @apply bg-blue-50 border-l-2 border-blue-500;
-}
+  .tree-node-selected {
+    @apply bg-blue-50 border-l-2 border-blue-500;
+  }
 
-.tree-actions {
-  @apply flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
+  .tree-actions {
+    @apply flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
+  }
+
+  /* File thumbnail styles */
+  .file-thumbnail {
+    @apply w-4 h-4 sm:w-5 sm:h-5 object-cover rounded;
+  }
+
+  .file-preview-modal {
+    @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4;
+  }
+
+  .file-preview-content {
+    @apply bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-auto;
+  }
 }
 
 /* Mobile specific styles */
@@ -91,17 +105,4 @@
   .tablet-grid {
     @apply grid-cols-2;
   }
-}
-
-/* File thumbnail styles */
-.file-thumbnail {
-  @apply w-4 h-4 sm:w-5 sm:h-5 object-cover rounded;
-}
-
-.file-preview-modal {
-  @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4;
-}
-
-.file-preview-content {
-  @apply bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-auto;
 }

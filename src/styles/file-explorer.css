@@ -1,97 +1,99 @@
 
 /* FileExplorer specific styles */
-.file-explorer-container {
-  @apply space-y-4 sm:space-y-6;
-}
+@layer components {
+  .file-explorer-container {
+    @apply space-y-4 sm:space-y-6;
+  }
 
-.file-explorer-header {
-  @apply text-center space-y-2;
-}
+  .file-explorer-header {
+    @apply text-center space-y-2;
+  }
 
-.file-explorer-title {
-  @apply text-2xl sm:text-3xl font-bold text-gray-900;
-}
+  .file-explorer-title {
+    @apply text-2xl sm:text-3xl font-bold text-gray-900;
+  }
 
-.file-explorer-subtitle {
-  @apply text-sm sm:text-base text-gray-600;
-}
+  .file-explorer-subtitle {
+    @apply text-sm sm:text-base text-gray-600;
+  }
 
-.file-operations-card {
-  @apply w-full;
-}
+  .file-operations-card {
+    @apply w-full;
+  }
 
-.file-operations-content {
-  @apply space-y-4;
-}
+  .file-operations-content {
+    @apply space-y-4;
+  }
 
-.file-operations-buttons {
-  @apply flex flex-col sm:flex-row gap-2 sm:gap-4;
-}
+  .file-operations-buttons {
+    @apply flex flex-col sm:flex-row gap-2 sm:gap-4;
+  }
 
-.upload-button-container {
-  @apply relative;
-}
+  .upload-button-container {
+    @apply relative;
+  }
 
-.upload-input {
-  @apply absolute inset-0 w-full h-full opacity-0 cursor-pointer;
-}
+  .upload-input {
+    @apply absolute inset-0 w-full h-full opacity-0 cursor-pointer;
+  }
 
-.drive-grid {
-  @apply grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6;
-}
+  .drive-grid {
+    @apply grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6;
+  }
 
-.drive-section {
-  @apply space-y-2;
-}
+  .drive-section {
+    @apply space-y-2;
+  }
 
-.drive-section-title {
-  @apply text-base sm:text-lg font-semibold;
-}
+  .drive-section-title {
+    @apply text-base sm:text-lg font-semibold;
+  }
 
-.backup-accounts-container {
-  @apply space-y-4;
-}
+  .backup-accounts-container {
+    @apply space-y-4;
+  }
 
-.instructions-container {
-  @apply text-xs sm:text-sm text-gray-500 bg-gray-50 p-3 sm:p-4 rounded-lg;
-}
+  .instructions-container {
+    @apply text-xs sm:text-sm text-gray-500 bg-gray-50 p-3 sm:p-4 rounded-lg;
+  }
 
-.instructions-title {
-  @apply font-medium mb-2;
-}
+  .instructions-title {
+    @apply font-medium mb-2;
+  }
 
-.instructions-list {
-  @apply space-y-1;
-}
+  .instructions-list {
+    @apply space-y-1;
+  }
 
-.large-files-section {
-  @apply mt-6 space-y-4;
-}
+  .large-files-section {
+    @apply mt-6 space-y-4;
+  }
 
-.large-files-grid {
-  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4;
-}
+  .large-files-grid {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4;
+  }
 
-.file-card {
-  @apply p-3 sm:p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors;
-}
+  .file-card {
+    @apply p-3 sm:p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors;
+  }
 
-.file-card-selected {
-  @apply bg-blue-50 border-blue-200;
-}
+  .file-card-selected {
+    @apply bg-blue-50 border-blue-200;
+  }
 
-.file-card-content {
-  @apply space-y-2;
-}
+  .file-card-content {
+    @apply space-y-2;
+  }
 
-.file-card-name {
-  @apply font-medium text-sm sm:text-base truncate;
-}
+  .file-card-name {
+    @apply font-medium text-sm sm:text-base truncate;
+  }
 
-.file-card-size {
-  @apply text-xs sm:text-sm text-gray-500;
-}
+  .file-card-size {
+    @apply text-xs sm:text-sm text-gray-500;
+  }
 
-.move-files-section {
-  @apply mt-4 flex flex-col sm:flex-row gap-2 sm:gap-4 items-start sm:items-center;
+  .move-files-section {
+    @apply mt-4 flex flex-col sm:flex-row gap-2 sm:gap-4 items-start sm:items-center;
+  }
 }

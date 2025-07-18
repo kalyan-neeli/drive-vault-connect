@@ -3,6 +3,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import component-specific styles first */
+@import url('./styles/global.css');
+
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.
 */
@@ -97,6 +100,3 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
-
-/* Import component-specific styles */
-@import url('./styles/global.css');
