@@ -25,6 +25,7 @@ interface TreeNode {
   size?: number;
   mimeType: string;
   modifiedTime: string;
+  createdTime: string;
   children?: TreeNode[];
   expanded?: boolean;
   path: string;
@@ -81,6 +82,7 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh, on
         size: file.size,
         mimeType: file.mimeType,
         modifiedTime: file.modifiedTime,
+        createdTime: file.createdTime,
         children: [],
         expanded: false,
         path: file.name,
@@ -248,6 +250,8 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh, on
         mimeType: node.mimeType,
         size: node.size,
         modifiedTime: node.modifiedTime,
+        createdTime: node.createdTime,
+        accountId: account.id,
         parentId: node.parentId,
         thumbnailUrl: node.thumbnailUrl,
         downloadUrl: node.downloadUrl
