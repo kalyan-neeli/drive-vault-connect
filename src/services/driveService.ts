@@ -237,6 +237,156 @@ export class DriveService {
     await this.deleteFile(fileId, sourceAccountId);
   }
 
+  async getGooglePhotos(accountId: string): Promise<DriveFile[]> {
+    const { data: user } = await supabase.auth.getUser();
+    if (!user.user) throw new Error('User not authenticated');
+
+    const accessToken = await this.authService.ensureValidToken(accountId);
+
+    // Query for image and video files
+    const query = 'https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink,thumbnailLink,parents,imageMediaMetadata,videoMediaMetadata)&q=mimeType contains "image/" or mimeType contains "video/"';
+
+    try {
+      const response = await fetch(query, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch photos from Google Drive');
+      }
+
+      const data = await response.json();
+      
+      const photos: DriveFile[] = data.files.map((file: any) => ({
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        size: parseInt(file.size || '0'),
+        createdTime: file.createdTime,
+        modifiedTime: file.modifiedTime,
+        accountId: accountId,
+        downloadUrl: file.webViewLink,
+        thumbnailUrl: file.thumbnailLink,
+        parentId: file.parents?.[0],
+        metadata: {
+          ...file.imageMediaMetadata,
+          ...file.videoMediaMetadata
+        }
+      }));
+
+      return photos;
+    } catch (error) {
+      console.error('Error fetching photos:', error);
+      return [];
+    }
+  }
+
+  async movePhotoWithMetadata(photoId: string, sourceAccountId: string, targetAccountId: string, targetFolderId: string, maintainPath: boolean = true): Promise<void> {
+    const sourceAccessToken = await this.authService.ensureValidToken(sourceAccountId);
+    const targetAccessToken = await this.authService.ensureValidToken(targetAccountId);
+
+    // Get photo metadata including EXIF data
+    const photoResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${photoId}?fields=name,mimeType,parents,imageMediaMetadata,videoMediaMetadata`, {
+      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
+    });
+    
+    const photoMetadata = await photoResponse.json();
+
+    // Download photo content
+    const downloadResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${photoId}?alt=media`, {
+      headers: { 'Authorization': `Bearer ${sourceAccessToken}` }
+    });
+    
+    const photoBlob = await downloadResponse.blob();
+
+    // Create folder path in target if maintainPath is true
+    let finalTargetFolderId = targetFolderId;
+    if (maintainPath && photoMetadata.parents) {
+      finalTargetFolderId = await this.recreateFolderPath(
+        photoMetadata.parents[0], 
+        sourceAccessToken, 
+        targetAccessToken,
+        targetFolderId,
+        sourceAccountId,
+        targetAccountId
+      );
+    }
+
+    // Check for duplicate names in target folder
+    await this.ensureUniqueFileName(photoMetadata.name, finalTargetFolderId, targetAccessToken);
+
+    // Upload to target account with metadata preservation
+    const uploadMetadata: any = {
+      name: photoMetadata.name,
+      mimeType: photoMetadata.mimeType,
+      parents: [finalTargetFolderId]
+    };
+
+    // Preserve EXIF metadata if available
+    if (photoMetadata.imageMediaMetadata) {
+      uploadMetadata.imageMediaMetadata = photoMetadata.imageMediaMetadata;
+    }
+    if (photoMetadata.videoMediaMetadata) {
+      uploadMetadata.videoMediaMetadata = photoMetadata.videoMediaMetadata;
+    }
+
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(uploadMetadata)], { type: 'application/json' }));
+    form.append('file', photoBlob);
+
+    const uploadResponse = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${targetAccessToken}` },
+        body: form
+      }
+    );
+
+    if (!uploadResponse.ok) {
+      throw new Error('Failed to upload photo to backup account');
+    }
+
+    // Share the moved photo back to primary account
+    await this.shareFileToPrimary(photoId, targetAccountId, sourceAccountId);
+
+    // Delete from source account
+    await this.deleteFile(photoId, sourceAccountId);
+  }
+
+  private async shareFileToPrimary(fileId: string, backupAccountId: string, primaryAccountId: string): Promise<void> {
+    const backupAccessToken = await this.authService.ensureValidToken(backupAccountId);
+    
+    // Get primary account email
+    const { data: primaryAccount } = await supabase
+      .from('google_accounts')
+      .select('email')
+      .eq('google_account_id', primaryAccountId)
+      .single();
+
+    if (!primaryAccount) return;
+
+    // Share file with primary account
+    const shareResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${backupAccessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        role: 'reader',
+        type: 'user',
+        emailAddress: primaryAccount.email
+      })
+    });
+
+    if (!shareResponse.ok) {
+      console.error('Failed to share file with primary account');
+    }
+  }
+
   private async recreateFolderPath(
     sourceFolderId: string,
     sourceToken: string,

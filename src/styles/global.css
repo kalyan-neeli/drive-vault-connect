@@ -1,66 +1,34 @@
 
-/* Common responsive utilities and styles */
-
-/* Container and layout utilities */
+/* Global responsive styles and common utilities */
 @layer components {
+  /* Container and responsive utilities */
   .container-responsive {
     @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
   }
 
-  .grid-responsive {
-    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6;
-  }
-
-  .flex-responsive {
-    @apply flex flex-col sm:flex-row gap-4 sm:gap-6;
-  }
-
-  /* Card responsive styles */
   .card-responsive {
-    @apply w-full min-h-0 overflow-hidden;
+    @apply w-full max-w-none;
   }
 
-  .card-content-responsive {
-    @apply p-4 sm:p-6 overflow-y-auto;
-  }
-
-  /* Button responsive styles */
   .button-responsive {
-    @apply px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base;
+    @apply text-sm sm:text-base px-3 py-2 sm:px-4 sm:py-2;
   }
 
-  .button-group-responsive {
-    @apply flex flex-col sm:flex-row gap-2 sm:gap-4;
+  .mobile-full-width {
+    @apply w-full sm:w-auto;
   }
 
-  /* Text responsive styles */
-  .text-responsive-sm {
-    @apply text-xs sm:text-sm;
-  }
-
-  .text-responsive-base {
-    @apply text-sm sm:text-base;
-  }
-
-  .text-responsive-lg {
-    @apply text-lg sm:text-xl lg:text-2xl;
-  }
-
-  .text-responsive-xl {
-    @apply text-xl sm:text-2xl lg:text-3xl;
-  }
-
-  /* Tree view responsive styles */
+  /* Tree component styles */
   .tree-container {
-    @apply h-64 sm:h-80 lg:h-96 overflow-y-auto;
+    @apply max-h-96 overflow-y-auto;
   }
 
   .tree-node {
-    @apply flex items-center gap-1 sm:gap-2 py-1 px-2 hover:bg-gray-50 cursor-pointer text-sm;
+    @apply flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer border border-transparent transition-colors;
   }
 
   .tree-node-selected {
-    @apply bg-blue-50 border-l-2 border-blue-500;
+    @apply bg-blue-50 border-blue-200;
   }
 
   .tree-actions {
@@ -69,40 +37,6 @@
 
   /* File thumbnail styles */
   .file-thumbnail {
-    @apply w-4 h-4 sm:w-5 sm:h-5 object-cover rounded;
-  }
-
-  .file-preview-modal {
-    @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4;
-  }
-
-  .file-preview-content {
-    @apply bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-auto;
-  }
-}
-
-/* Mobile specific styles */
-@media (max-width: 640px) {
-  .mobile-stack {
-    @apply flex-col space-y-4;
-  }
-  
-  .mobile-full-width {
-    @apply w-full;
-  }
-  
-  .mobile-hidden {
-    @apply hidden;
-  }
-  
-  .mobile-text-center {
-    @apply text-center;
-  }
-}
-
-/* Tablet specific styles */
-@media (min-width: 641px) and (max-width: 1024px) {
-  .tablet-grid {
-    @apply grid-cols-2;
+    @apply w-4 h-4 sm:w-5 sm:h-5 object-cover rounded flex-shrink-0;
   }
 }
