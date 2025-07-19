@@ -1,6 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
+import { subscribe } from 'diagnostics_channel';
 
-const GOOGLE_CLIENT_ID = 'afasj,gnsdkjgbndts.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '509857069478-q85n7l2cogr5muodad8mtd6g7e1isdts.apps.googleusercontent.com';
 // Note: For refresh tokens to work in production, you'll need to add the client secret to Supabase Edge Functions
 const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
@@ -115,18 +116,22 @@ export class GoogleAuthService {
 
   private async exchangeCodeForTokens(authCode: string): Promise<GoogleAccount> {
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      throw new Error('User not authenticated');
+    }
       // Exchange authorization code for tokens
       const redirectUri = this.getRedirectUri();
-      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      const tokenResponse = await fetch('https://zxxcowhyrhlgkfhtsxre.supabase.co/functions/v1/google-fetch-token', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
+          'Authorization':`Bearer ${session.access_token}`
         },
-        body: new URLSearchParams({
-          client_id: GOOGLE_CLIENT_ID,
+        body: JSON.stringify({
           code: authCode,
           code_verifier: this.codeVerifier,
-          grant_type: 'authorization_code',
           redirect_uri: redirectUri,
         }),
       });
@@ -136,6 +141,7 @@ export class GoogleAuthService {
       }
 
       const tokens = await tokenResponse.json();
+      console.log("Auth tokens ",tokens);
       
       // Get user profile information
       const profileResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
@@ -433,7 +439,7 @@ export class GoogleAuthService {
   private async findExistingSharedFolder(accessToken: string, folderName: string, primaryEmail: string): Promise<string | null> {
     try {
       const searchResponse = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=name='${folderName}' and mimeType='application/vnd.google-apps.folder'&fields=files(id,name)`,
+        `https://www.googleapis.com/drive/v3/files?q=name='${folderName}' and mimeType='application/vnd.google-apps.folder'&fields=files(id,name,permissions)`,
         {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         }
@@ -443,15 +449,15 @@ export class GoogleAuthService {
       
       if (searchData.files && searchData.files.length > 0) {
         for (const folder of searchData.files) {
-          const permissionsResponse = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${folder.id}/permissions`,
-            {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            }
-          );
+          // const permissionsResponse = await fetch(
+          //   `https://www.googleapis.com/drive/v3/files/${folder.id}/permissions`,
+          //   {
+          //     headers: { 'Authorization': `Bearer ${accessToken}` }
+          //   }
+          // );
 
-          const permissionsData = await permissionsResponse.json();
-          const hasWriterPermission = permissionsData.permissions?.some(
+          const permissionsData = await folder.permissions;
+          const hasWriterPermission = permissionsData?.some(
             (perm: any) => perm.emailAddress === primaryEmail && perm.role === 'writer'
           );
 

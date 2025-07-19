@@ -1,4 +1,6 @@
 
+@tailwind components
+
 /* Global responsive styles and common utilities */
 @layer components {
   /* Container and responsive utilities */

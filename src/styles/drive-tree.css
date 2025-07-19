@@ -1,6 +1,25 @@
-
+@tailwind components
 /* DriveTree specific styles */
 @layer components {
+  .card-responsive {
+    @apply w-full max-w-none;
+  }
+  .tree-container {
+    @apply max-h-96 overflow-y-auto;
+  }
+
+  .tree-node {
+    @apply flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer border border-transparent transition-colors;
+  }
+
+  .tree-node-selected {
+    @apply bg-blue-50 border-blue-200;
+  }
+
+  .tree-actions {
+    @apply flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
+  }
+
   .drive-tree-card {
     @apply h-full card-responsive;
   }
@@ -33,8 +52,11 @@
     @apply space-y-1;
   }
 
-  .drive-tree-node {
+  /* .drive-tree-node {
     @apply tree-node group;
+  } */
+  .drive-tree-node {
+    @apply tree-node;
   }
 
   .drive-tree-node-selected {
