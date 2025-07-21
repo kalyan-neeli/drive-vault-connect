@@ -1,3 +1,6 @@
+import "../styles/global.css";
+import "../styles/file-explorer.css";
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,8 +15,6 @@ import { DriveTree } from "./DriveTree";
 import { FilePreview } from "./FilePreview";
 import { GooglePhotosTree } from "./GooglePhotosTree";
 import { Eye, Download } from "lucide-react";
-import "../styles/global.css";
-import "../styles/file-explorer.css";
 
 interface FileExplorerProps {
   accounts: GoogleAccount[];

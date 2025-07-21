@@ -1,3 +1,6 @@
+import "../styles/global.css";
+import "../styles/drive-tree.css";
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +11,6 @@ import { useToast } from "@/hooks/use-toast";
 import { DriveService, DriveFile } from "@/services/driveService";
 import { GoogleAccount, GoogleAuthService } from "@/services/googleAuth";
 import { Folder, File, Plus, Trash2, FolderPlus, ChevronRight, ChevronDown, Eye } from "lucide-react";
-import "../styles/drive-tree.css";
 
 interface DriveTreeProps {
   account: GoogleAccount;
@@ -296,7 +298,7 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh, on
               ) : node.thumbnailUrl ? (
                 <img 
                   src={node.thumbnailUrl} 
-                  alt={node.name}
+                  // alt={node.name}
                   className="tree-file-thumbnail"
                 />
               ) : (

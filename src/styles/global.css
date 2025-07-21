@@ -1,5 +1,6 @@
-
-@tailwind components
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Global responsive styles and common utilities */
 @layer components {
@@ -9,7 +10,15 @@
   }
 
   .card-responsive {
-    @apply w-full max-w-none;
+    @apply w-full min-h-0 overflow-hidden;
+  }
+
+  .grid-responsive {
+    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6;
+  }
+
+  .flex-responsive {
+    @apply flex flex-col sm:flex-row gap-4 sm:gap-6
   }
 
   .button-responsive {

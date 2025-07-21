@@ -1,11 +1,11 @@
-
+import "../styles/global.css";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { DriveFile } from "@/services/driveService";
 import { GoogleAuthService } from "@/services/googleAuth";
 import { Download, X } from "lucide-react";
-import "../styles/global.css";
+
 
 interface FilePreviewProps {
   file: DriveFile;
