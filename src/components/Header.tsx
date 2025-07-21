@@ -1,6 +1,8 @@
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Menu } from "lucide-react";
 
 interface HeaderProps {
   activeView: 'dashboard' | 'accounts' | 'files';
@@ -10,6 +12,47 @@ interface HeaderProps {
 }
 
 export const Header = ({ activeView, onViewChange, accountCount, onSignOut }: HeaderProps) => {
+  const NavigationContent = () => (
+    <>
+      <Button
+        variant={activeView === 'dashboard' ? 'default' : 'ghost'}
+        onClick={() => onViewChange('dashboard')}
+        className="relative w-full sm:w-auto justify-start sm:justify-center"
+      >
+        Dashboard
+      </Button>
+      
+      <Button
+        variant={activeView === 'accounts' ? 'default' : 'ghost'}
+        onClick={() => onViewChange('accounts')}
+        className="relative w-full sm:w-auto justify-start sm:justify-center"
+      >
+        Accounts
+        {accountCount > 0 && (
+          <Badge variant="secondary" className="ml-2 text-xs">
+            {accountCount}
+          </Badge>
+        )}
+      </Button>
+      
+      <Button
+        variant={activeView === 'files' ? 'default' : 'ghost'}
+        onClick={() => onViewChange('files')}
+        className="w-full sm:w-auto justify-start sm:justify-center"
+      >
+        Files
+      </Button>
+
+      <Button
+        variant="outline"
+        onClick={onSignOut}
+        className="w-full sm:w-auto justify-start sm:justify-center sm:ml-4"
+      >
+        Sign Out
+      </Button>
+    </>
+  );
+
   return (
     <header className="bg-white border-b border-gray-200 shadow-sm">
       <div className="container mx-auto px-4 py-4">
@@ -21,43 +64,24 @@ export const Header = ({ activeView, onViewChange, accountCount, onSignOut }: He
             <h1 className="text-xl font-bold text-gray-900">DriveSync</h1>
           </div>
           
-          <nav className="flex items-center space-x-1">
-            <Button
-              variant={activeView === 'dashboard' ? 'default' : 'ghost'}
-              onClick={() => onViewChange('dashboard')}
-              className="relative"
-            >
-              Dashboard
-            </Button>
-            
-            <Button
-              variant={activeView === 'accounts' ? 'default' : 'ghost'}
-              onClick={() => onViewChange('accounts')}
-              className="relative"
-            >
-              Accounts
-              {accountCount > 0 && (
-                <Badge variant="secondary" className="ml-2 text-xs">
-                  {accountCount}
-                </Badge>
-              )}
-            </Button>
-            
-            <Button
-              variant={activeView === 'files' ? 'default' : 'ghost'}
-              onClick={() => onViewChange('files')}
-            >
-              Files
-            </Button>
-
-            <Button
-              variant="outline"
-              onClick={onSignOut}
-              className="ml-4"
-            >
-              Sign Out
-            </Button>
+          {/* Desktop Navigation */}
+          <nav className="hidden md:flex items-center space-x-1">
+            <NavigationContent />
           </nav>
+
+          {/* Mobile Navigation */}
+          <Sheet>
+            <SheetTrigger asChild className="md:hidden">
+              <Button variant="ghost" size="icon">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-64">
+              <div className="flex flex-col space-y-4 mt-8">
+                <NavigationContent />
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
     </header>

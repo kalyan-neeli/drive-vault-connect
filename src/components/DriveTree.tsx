@@ -9,357 +9,289 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { formatBytes } from "@/utils/formatBytes";
 import { useToast } from "@/hooks/use-toast";
 import { DriveService, DriveFile } from "@/services/driveService";
-import { GoogleAccount, GoogleAuthService } from "@/services/googleAuth";
+import { GoogleAccount } from "@/services/googleAuth";
 import { Folder, File, Plus, Trash2, FolderPlus, ChevronRight, ChevronDown, Eye } from "lucide-react";
 
 interface DriveTreeProps {
   account: GoogleAccount;
-  isBackup?: boolean;
-  onFileMove?: (fileId: string, targetFolderId: string, targetAccountId: string) => void;
-  onRefresh?: () => void;
-  onFilePreview?: (file: DriveFile) => void;
+  onFileSelect?: (file: DriveFile) => void;
 }
 
 interface TreeNode {
   id: string;
   name: string;
-  type: 'folder' | 'file';
-  size?: number;
+  type: 'file' | 'folder';
+  size: number;
   mimeType: string;
-  modifiedTime: string;
-  createdTime: string;
   children?: TreeNode[];
-  expanded?: boolean;
-  path: string;
-  parentId?: string;
   thumbnailUrl?: string;
-  downloadUrl?: string;
+  createdTime: string;
+  accountId: string;
+  isChildrenLoaded?: boolean;
 }
 
-export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh, onFilePreview }: DriveTreeProps) => {
-  const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
+  const [files, setFiles] = useState<TreeNode[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [newFolderName, setNewFolderName] = useState("");
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [createParentId, setCreateParentId] = useState<string | null>(null);
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [currentParentId, setCurrentParentId] = useState<string | null>(null);
+
+  const driveService = new DriveService();
   const { toast } = useToast();
-  const [driveService] = useState(new DriveService());
-  const [googleAuth] = useState(new GoogleAuthService());
 
   useEffect(() => {
-    loadTreeData();
-  }, [account]);
+    // Reset and load root files when account changes
+    setFiles([]);
+    setExpandedFolders(new Set());
+    loadFiles();
+  }, [account.id]);
 
-  const loadTreeData = async () => {
-    setLoading(true);
+  const loadFiles = async (folderId?: string) => {
     try {
-      // Ensure valid token before making API calls
-      await googleAuth.ensureValidToken(account.id);
+      setLoading(folderId ? false : true); // Only show main loading for root
+      setError(null);
       
-      const files = await driveService.getFiles(account.id);
-      const tree = buildFileTree(files);
-      setTreeData(tree);
-    } catch (error) {
-      console.error('Error loading tree data:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load files",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const buildFileTree = (files: DriveFile[]): TreeNode[] => {
-    const nodeMap = new Map<string, TreeNode>();
-    const rootNodes: TreeNode[] = [];
-
-    files.forEach(file => {
-      const node: TreeNode = {
+      const fetchedFiles = await driveService.getFiles(account.id, folderId);
+      
+      const treeNodes: TreeNode[] = fetchedFiles.map(file => ({
         id: file.id,
         name: file.name,
         type: file.mimeType === 'application/vnd.google-apps.folder' ? 'folder' : 'file',
         size: file.size,
         mimeType: file.mimeType,
-        modifiedTime: file.modifiedTime,
-        createdTime: file.createdTime,
-        children: [],
-        expanded: false,
-        path: file.name,
-        parentId: file.parentId,
+        children: file.mimeType === 'application/vnd.google-apps.folder' ? [] : undefined,
         thumbnailUrl: file.thumbnailUrl,
-        downloadUrl: file.downloadUrl
-      };
-      nodeMap.set(file.id, node);
-    });
-
-    nodeMap.forEach(node => {
-      if (node.parentId && nodeMap.has(node.parentId)) {
-        const parent = nodeMap.get(node.parentId)!;
-        parent.children = parent.children || [];
-        parent.children.push(node);
-        node.path = `${parent.path}/${node.name}`;
+        createdTime: file.createdTime,
+        accountId: file.accountId,
+        isChildrenLoaded: false // Track if children have been loaded
+      }));
+      
+      if (folderId) {
+        // Update children of specific folder
+        setFiles(prevFiles => updateTreeChildren(prevFiles, folderId, treeNodes));
       } else {
-        rootNodes.push(node);
+        // Set root files
+        setFiles(treeNodes);
       }
-    });
-
-    const sortNodes = (nodes: TreeNode[]) => {
-      return nodes.sort((a, b) => {
-        if (a.type !== b.type) {
-          return a.type === 'folder' ? -1 : 1;
-        }
-        return a.name.localeCompare(b.name);
-      });
-    };
-
-    const applySortRecursively = (nodes: TreeNode[]) => {
-      nodes.forEach(node => {
-        if (node.children) {
-          node.children = applySortRecursively(sortNodes(node.children));
-        }
-      });
-      return nodes;
-    };
-
-    return applySortRecursively(sortNodes(rootNodes));
+    } catch (err) {
+      console.error('Error loading files:', err);
+      setError('Failed to load files. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const toggleNode = (nodeId: string) => {
-    const updateNodes = (nodes: TreeNode[]): TreeNode[] => {
-      return nodes.map(node => {
-        if (node.id === nodeId) {
-          return { ...node, expanded: !node.expanded };
-        }
-        if (node.children) {
-          return { ...node, children: updateNodes(node.children) };
-        }
-        return node;
-      });
-    };
-    setTreeData(updateNodes(treeData));
+  const updateTreeChildren = (nodes: TreeNode[], folderId: string, children: TreeNode[]): TreeNode[] => {
+    return nodes.map(node => {
+      if (node.id === folderId) {
+        return { ...node, children, isChildrenLoaded: true };
+      }
+      if (node.children) {
+        return { ...node, children: updateTreeChildren(node.children, folderId, children) };
+      }
+      return node;
+    });
+  };
+
+  const handleFolderToggle = (folderId: string) => {
+    if (expandedFolders.has(folderId)) {
+      const newExpanded = new Set(expandedFolders);
+      newExpanded.delete(folderId);
+      setExpandedFolders(newExpanded);
+    } else {
+      const newExpanded = new Set(expandedFolders);
+      newExpanded.add(folderId);
+      setExpandedFolders(newExpanded);
+      
+      // Load folder contents if not already loaded
+      const folderNode = findNodeById(files, folderId);
+      if (folderNode && !folderNode.isChildrenLoaded) {
+        loadFiles(folderId);
+      }
+    }
+  };
+
+  const findNodeById = (nodes: TreeNode[], nodeId: string): TreeNode | null => {
+    for (const node of nodes) {
+      if (node.id === nodeId) return node;
+      if (node.children) {
+        const found = findNodeById(node.children, nodeId);
+        if (found) return found;
+      }
+    }
+    return null;
   };
 
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return;
 
-    const parentNode = findNodeById(createParentId || 'root');
-    const siblings = parentNode?.children || treeData;
-    const isDuplicate = siblings.some(child => 
-      child.name.toLowerCase() === newFolderName.toLowerCase()
-    );
-
-    if (isDuplicate) {
-      toast({
-        title: "Error",
-        description: "A folder with this name already exists",
-        variant: "destructive"
-      });
-      return;
-    }
-
+    setIsCreatingFolder(true);
     try {
-      await googleAuth.ensureValidToken(account.id);
-      await driveService.createFolder(newFolderName, account.id, createParentId);
+      await driveService.createFolder(newFolderName, account.id, currentParentId || undefined);
       setNewFolderName("");
-      setShowCreateDialog(false);
-      setCreateParentId(null);
-      await loadTreeData();
-      onRefresh?.();
+      setCurrentParentId(null);
+      
+      // Refresh the appropriate folder
+      if (currentParentId) {
+        loadFiles(currentParentId);
+      } else {
+        loadFiles();
+      }
+      
       toast({
         title: "Success",
-        description: "Folder created successfully"
+        description: "Folder created successfully",
       });
     } catch (error) {
+      console.error('Error creating folder:', error);
       toast({
         title: "Error",
         description: "Failed to create folder",
-        variant: "destructive"
+        variant: "destructive",
       });
+    } finally {
+      setIsCreatingFolder(false);
     }
   };
 
-  const handleDelete = async (nodeId: string, isFolder: boolean) => {
+  const handleDeleteFile = async (fileId: string) => {
     try {
-      await googleAuth.ensureValidToken(account.id);
-      if (isFolder) {
-        await driveService.deleteFolder(nodeId, account.id);
-      } else {
-        await driveService.deleteFile(nodeId, account.id);
-      }
-      await loadTreeData();
-      onRefresh?.();
+      await driveService.deleteFile(fileId, account.id);
+      loadFiles(); // Refresh root files
       toast({
         title: "Success",
-        description: `${isFolder ? 'Folder' : 'File'} deleted successfully`
+        description: "File deleted successfully",
       });
     } catch (error) {
+      console.error('Error deleting file:', error);
       toast({
         title: "Error",
-        description: `Failed to delete ${isFolder ? 'folder' : 'file'}`,
-        variant: "destructive"
+        description: "Failed to delete file",
+        variant: "destructive",
       });
     }
   };
 
-  const findNodeById = (nodeId: string | null): TreeNode | null => {
-    if (!nodeId || nodeId === 'root') return null;
-    
-    const search = (nodes: TreeNode[]): TreeNode | null => {
-      for (const node of nodes) {
-        if (node.id === nodeId) return node;
-        if (node.children) {
-          const found = search(node.children);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-    return search(treeData);
-  };
-
-  const handleDragStart = (e: React.DragEvent, nodeId: string, nodeName: string) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({
-      sourceAccountId: account.id,
-      fileId: nodeId,
-      fileName: nodeName
-    }));
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = (e: React.DragEvent, targetFolderId: string) => {
-    e.preventDefault();
+  const handleDeleteFolder = async (folderId: string) => {
     try {
-      const data = JSON.parse(e.dataTransfer.getData('application/json'));
-      if (onFileMove && data.sourceAccountId !== account.id) {
-        onFileMove(data.fileId, targetFolderId, account.id);
-      }
+      await driveService.deleteFolder(folderId, account.id);
+      loadFiles(); // Refresh root files
+      toast({
+        title: "Success",
+        description: "Folder deleted successfully",
+      });
     } catch (error) {
-      console.error('Error handling drop:', error);
+      console.error('Error deleting folder:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete folder",
+        variant: "destructive",
+      });
     }
   };
 
   const handleFilePreview = (node: TreeNode) => {
-    if (onFilePreview && node.type === 'file') {
-      const driveFile: DriveFile = {
-        id: node.id,
-        name: node.name,
-        mimeType: node.mimeType,
-        size: node.size,
-        modifiedTime: node.modifiedTime,
-        createdTime: node.createdTime,
-        accountId: account.id,
-        parentId: node.parentId,
-        thumbnailUrl: node.thumbnailUrl,
-        downloadUrl: node.downloadUrl
-      };
-      onFilePreview(driveFile);
+    const file: DriveFile = {
+      id: node.id,
+      name: node.name,
+      mimeType: node.mimeType,
+      size: node.size,
+      createdTime: node.createdTime,
+      modifiedTime: node.createdTime,
+      accountId: node.accountId,
+      thumbnailUrl: node.thumbnailUrl
+    };
+    
+    setSelectedFile(file);
+    if (onFileSelect) {
+      onFileSelect(file);
     }
   };
 
-  const renderNode = (node: TreeNode, level: number = 0): React.ReactNode => {
-    const isSelected = selectedNode === node.id;
-    const paddingLeft = `${level * 16 + 8}px`;
-
+  const renderTreeNode = (node: TreeNode, depth: number = 0): React.ReactNode => {
+    const isExpanded = expandedFolders.has(node.id);
+    const hasChildren = node.children && node.children.length > 0;
+    
     return (
-      <div key={node.id}>
-        <div
-          className={`drive-tree-node ${isSelected ? 'drive-tree-node-selected' : ''}`}
-          style={{ paddingLeft }}
-          onClick={() => setSelectedNode(node.id)}
-          draggable={node.type === 'file' || !isBackup}
-          onDragStart={(e) => handleDragStart(e, node.id, node.name)}
-          onDragOver={node.type === 'folder' ? handleDragOver : undefined}
-          onDrop={node.type === 'folder' ? (e) => handleDrop(e, node.id) : undefined}
+      <div key={node.id} className="drive-tree-node-container">
+        <div 
+          className="drive-tree-node"
+          style={{ paddingLeft: `${depth * 20}px` }}
         >
           <div className="drive-tree-node-content">
-            {node.type === 'folder' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="drive-tree-expand-button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleNode(node.id);
-                }}
-              >
-                {node.expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              </Button>
-            )}
-            
+            <button
+              onClick={() => handleFolderToggle(node.id)}
+              className="drive-tree-expand-button"
+            >
+              {expandedFolders.has(node.id) ? (
+                <ChevronDown className="drive-tree-node-icon" />
+              ) : (
+                <ChevronRight className="drive-tree-node-icon" />
+              )}
+            </button>
+
             <div className="drive-tree-node-icon">
               {node.type === 'folder' ? (
-                <Folder className="h-4 w-4 text-blue-600" />
+                <Folder className="h-4 w-4 text-blue-500" />
               ) : node.thumbnailUrl ? (
                 <img 
                   src={node.thumbnailUrl} 
-                  // alt={node.name}
+                  alt={node.name}
                   className="tree-file-thumbnail"
                 />
               ) : (
-                <File className="h-4 w-4 text-gray-600" />
+                <File className="h-4 w-4 text-gray-500" />
               )}
             </div>
-            
+
             <span className="drive-tree-node-name">{node.name}</span>
-            
+
             {node.type === 'file' && (
-              <span className="drive-tree-node-size">{formatBytes(node.size || 0)}</span>
+              <span className="drive-tree-node-size">{formatBytes(node.size)}</span>
             )}
           </div>
-          
+
           <div className="drive-tree-node-actions">
             {node.type === 'file' && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="drive-tree-action-button text-blue-600"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleFilePreview(node);
-                }}
+                onClick={() => handleFilePreview(node)}
+                className="drive-tree-action-button"
               >
                 <Eye className="h-3 w-3" />
               </Button>
             )}
-            
+
             {node.type === 'folder' && (
               <Button
                 variant="ghost"
                 size="sm"
+                onClick={() => setCurrentParentId(node.id)}
                 className="drive-tree-action-button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCreateParentId(node.id);
-                  setShowCreateDialog(true);
-                }}
               >
                 <FolderPlus className="h-3 w-3" />
               </Button>
             )}
-            
+
             <Button
               variant="ghost"
               size="sm"
-              className="drive-tree-action-button text-red-600 hover:text-red-800"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDelete(node.id, node.type === 'folder');
-              }}
+              onClick={() => node.type === 'folder' ? handleDeleteFolder(node.id) : handleDeleteFile(node.id)}
+              className="drive-tree-action-button text-red-500 hover:text-red-700"
             >
               <Trash2 className="h-3 w-3" />
             </Button>
           </div>
         </div>
-        
-        {node.type === 'folder' && node.expanded && node.children && (
+
+        {node.children && expandedFolders.has(node.id) && (
           <div className="drive-tree-children">
-            {node.children.map(child => renderNode(child, level + 1))}
+            {node.children.map(child => renderTreeNode(child, depth + 1))}
           </div>
         )}
       </div>
@@ -368,72 +300,91 @@ export const DriveTree = ({ account, isBackup = false, onFileMove, onRefresh, on
 
   if (loading) {
     return (
-      <Card className="drive-tree-card">
-        <CardContent className="pt-6">
+      <Card>
+        <CardContent className="flex items-center justify-center py-8">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-sm">Loading files...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p>Loading files...</p>
           </div>
         </CardContent>
       </Card>
     );
   }
 
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="text-center py-8">
+          <p className="text-red-500 mb-4">{error}</p>
+          <Button onClick={() => loadFiles()} variant="outline">
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="drive-tree-card">
-      <CardHeader className="drive-tree-header">
-        <div className="drive-tree-header-content">
-          <CardTitle className="drive-tree-title">
-            {account.email} ({isBackup ? 'Backup' : 'Primary'})
-          </CardTitle>
-          <div className="drive-tree-actions">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setCreateParentId(null);
-                setShowCreateDialog(true);
-              }}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg">Drive Files</CardTitle>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCurrentParentId(null)}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Folder
+          </Button>
         </div>
       </CardHeader>
-      
-      <CardContent className="drive-tree-content">
-        {treeData.length === 0 ? (
-          <div className="drive-tree-empty">
-            No files found
+
+      <CardContent>
+        {files.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            <p>No files found in this account</p>
           </div>
         ) : (
-          <div className="drive-tree-nodes">
-            {treeData.map(node => renderNode(node))}
+          <div className="space-y-1 max-h-96 overflow-y-auto">
+            {files.map(node => renderTreeNode(node))}
           </div>
         )}
-      </CardContent>
 
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create New Folder</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Input
-              placeholder="Folder name"
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleCreateFolder()}
-            />
-            <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateFolder}>Create</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+        {currentParentId !== null && (
+          <Dialog open={true} onOpenChange={() => setCurrentParentId(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New Folder</DialogTitle>
+              </DialogHeader>
+              
+              <div className="space-y-4">
+                <Input
+                  placeholder="Folder name"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleCreateFolder()}
+                />
+                
+                <div className="flex gap-2 justify-end">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setCurrentParentId(null)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={handleCreateFolder}
+                    disabled={isCreatingFolder || !newFolderName.trim()}
+                  >
+                    {isCreatingFolder ? "Creating..." : "Create"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+      </CardContent>
     </Card>
   );
 };

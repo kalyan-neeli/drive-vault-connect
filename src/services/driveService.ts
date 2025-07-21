@@ -35,9 +35,8 @@ export class DriveService {
 
     if (accountError) throw accountError;
 
-    // For primary accounts, exclude shared folders created for backup accounts
-    // For backup accounts, only show files from shared folder
-    let query = 'https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink,thumbnailLink,parents)';
+    // Build query to exclude shared folders from backup accounts in primary account view
+    let query = 'https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink,thumbnailLink,parents)&pageSize=1000';
     
     if (account.account_type === 'backup' && account.shared_folder_id) {
       // For backup accounts, only show files from shared folder
@@ -51,18 +50,26 @@ export class DriveService {
         .eq('account_type', 'backup')
         .not('shared_folder_id', 'is', null);
 
+      let excludeQuery = '';
       if (backupAccounts && backupAccounts.length > 0) {
         const excludeFolders = backupAccounts
           .map(acc => `'${acc.shared_folder_id}' in parents`)
           .join(' or ');
-        query += `&q=not (${excludeFolders})`;
+        excludeQuery = `not (${excludeFolders})`;
       }
-      
+
       if (folderId) {
-        query += ` and '${folderId}' in parents`;
+        const folderQuery = `'${folderId}' in parents`;
+        query += `&q=${excludeQuery ? `(${folderQuery}) and (${excludeQuery})` : folderQuery}`;
+      } else {
+        // Load only root level folders and files initially
+        const rootQuery = `'root' in parents or parents = undefined`;
+        query += `&q=${excludeQuery ? `(${rootQuery}) and (${excludeQuery})` : rootQuery}`;
       }
     } else if (folderId) {
       query += `&q='${folderId}' in parents`;
+    } else {
+      query += `&q='root' in parents or parents = undefined`;
     }
 
     // Fetch files from Google Drive API
@@ -92,14 +99,81 @@ export class DriveService {
         parentId: file.parents?.[0]
       }));
 
-      // Store files in database for caching
-      await this.syncFilesToDatabase(files, accountId);
-
       return files;
     } catch (error) {
       console.error('Error fetching files:', error);
-      // Fallback to cached files from database
-      return this.getCachedFiles(accountId);
+      return [];
+    }
+  }
+
+  async getLargestFiles(accountId: string, limit: number = 100): Promise<DriveFile[]> {
+    const { data: user } = await supabase.auth.getUser();
+    if (!user.user) throw new Error('User not authenticated');
+
+    const accessToken = await this.authService.ensureValidToken(accountId);
+
+    // Get account details to exclude shared folders
+    const { data: account } = await supabase
+      .from('google_accounts')
+      .select('account_type, shared_folder_id')
+      .eq('user_id', user.user.id)
+      .eq('google_account_id', accountId)
+      .single();
+
+    // Build query to exclude shared folders from backup accounts
+    let query = `https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink,thumbnailLink,parents)&pageSize=${limit}&orderBy=quotaBytesUsed desc`;
+    
+    if (account?.account_type === 'primary') {
+      const { data: backupAccounts } = await supabase
+        .from('google_accounts')
+        .select('shared_folder_id')
+        .eq('user_id', user.user.id)
+        .eq('account_type', 'backup')
+        .not('shared_folder_id', 'is', null);
+
+      if (backupAccounts && backupAccounts.length > 0) {
+        const excludeFolders = backupAccounts
+          .map(acc => `'${acc.shared_folder_id}' in parents`)
+          .join(' or ');
+        query += `&q=not (${excludeFolders}) and mimeType != 'application/vnd.google-apps.folder'`;
+      } else {
+        query += `&q=mimeType != 'application/vnd.google-apps.folder'`;
+      }
+    } else {
+      query += `&q=mimeType != 'application/vnd.google-apps.folder'`;
+    }
+
+    try {
+      const response = await fetch(query, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch largest files');
+      }
+
+      const data = await response.json();
+      
+      return data.files
+        .filter((file: any) => file.size && parseInt(file.size) > 0)
+        .map((file: any) => ({
+          id: file.id,
+          name: file.name,
+          mimeType: file.mimeType,
+          size: parseInt(file.size || '0'),
+          createdTime: file.createdTime,
+          modifiedTime: file.modifiedTime,
+          accountId: accountId,
+          downloadUrl: file.webViewLink,
+          thumbnailUrl: file.thumbnailLink,
+          parentId: file.parents?.[0]
+        }))
+        .sort((a: DriveFile, b: DriveFile) => b.size - a.size);
+    } catch (error) {
+      console.error('Error fetching largest files:', error);
+      return [];
     }
   }
 
@@ -480,69 +554,28 @@ export class DriveService {
     return fileName;
   }
 
-  private async syncFilesToDatabase(files: DriveFile[], accountId: string) {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) return;
+  async moveFilesInBatch(fileIds: string[], sourceAccountId: string, targetAccountId: string, targetFolderId: string, onProgress?: (completed: number, total: number) => void): Promise<void> {
+    const total = fileIds.length;
+    let completed = 0;
 
-    const { data: googleAccount } = await supabase
-      .from('google_accounts')
-      .select('id')
-      .eq('google_account_id', accountId)
-      .single();
-
-    if (!googleAccount) return;
-
-    for (const file of files) {
-      await supabase
-        .from('drive_files')
-        .upsert({
-          user_id: user.user.id,
-          google_account_id: googleAccount.id,
-          drive_file_id: file.id,
-          name: file.name,
-          mime_type: file.mimeType,
-          size: file.size,
-          created_time: file.createdTime,
-          modified_time: file.modifiedTime,
-          download_url: file.downloadUrl,
-          thumbnail_url: file.thumbnailUrl,
-          synced_at: new Date().toISOString()
-        });
+    for (const fileId of fileIds) {
+      try {
+        await this.moveFileWithPath(fileId, sourceAccountId, targetAccountId, targetFolderId, true);
+        completed++;
+        if (onProgress) {
+          onProgress(completed, total);
+        }
+      } catch (error) {
+        console.error(`Failed to move file ${fileId}:`, error);
+        // Continue with other files even if one fails
+      }
     }
   }
 
-  private async getCachedFiles(accountId: string): Promise<DriveFile[]> {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) return [];
-
-    const { data: googleAccount } = await supabase
-      .from('google_accounts')
-      .select('id')
-      .eq('google_account_id', accountId)
-      .single();
-
-    if (!googleAccount) return [];
-
-    const { data, error } = await supabase
-      .from('drive_files')
-      .select('*')
-      .eq('user_id', user.user.id)
-      .eq('google_account_id', googleAccount.id)
-      .eq('is_deleted', false);
-
-    if (error) return [];
-
-    return data.map(file => ({
-      id: file.drive_file_id,
-      name: file.name,
-      mimeType: file.mime_type,
-      size: file.size || 0,
-      createdTime: file.created_time || '',
-      modifiedTime: file.modified_time || '',
-      accountId: accountId,
-      downloadUrl: file.download_url,
-      thumbnailUrl: file.thumbnail_url
-    }));
+  // Remove database storage methods since we're not storing files in DB anymore
+  private async syncFilesToDatabase(files: DriveFile[], accountId: string) {
+    // No longer storing files in database
+    return;
   }
 
   async uploadFile(file: File, accountId?: string, targetFolderId?: string): Promise<DriveFile> {
@@ -642,55 +675,5 @@ export class DriveService {
     const topAccounts = accountsWithFreeSpace.filter(acc => acc.freeSpace === maxFreeSpace);
     
     return topAccounts[Math.floor(Math.random() * topAccounts.length)].google_account_id;
-  }
-
-  async getLargestFiles(accountId: string, limit: number = 10): Promise<DriveFile[]> {
-    const files = await this.getFiles(accountId);
-    return files
-      .filter(file => file.size > 0)
-      .sort((a, b) => b.size - a.size)
-      .slice(0, limit);
-  }
-
-  async moveFileToBackup(fileId: string, sourceAccountId: string, targetAccountId?: string, maintainPath?: boolean): Promise<void> {
-    if (!targetAccountId) {
-      targetAccountId = await this.selectBestBackupAccount();
-    }
-
-    const { data: targetAccount } = await supabase
-      .from('google_accounts')
-      .select('shared_folder_id')
-      .eq('google_account_id', targetAccountId)
-      .single();
-
-    if (!targetAccount?.shared_folder_id) throw new Error('Target account shared folder not found');
-
-    await this.moveFileWithPath(fileId, sourceAccountId, targetAccountId, targetAccount.shared_folder_id, maintainPath);
-  }
-
-  async checkStorageAndAutoMove(primaryAccountId: string): Promise<void> {
-    const { data: primaryAccount } = await supabase
-      .from('google_accounts')
-      .select('total_storage, used_storage')
-      .eq('google_account_id', primaryAccountId)
-      .single();
-
-    if (!primaryAccount) return;
-
-    const freeSpace = (primaryAccount.total_storage || 0) - (primaryAccount.used_storage || 0);
-    const storageThreshold = (primaryAccount.total_storage || 0) * 0.1; // 10% threshold
-
-    if (freeSpace < storageThreshold) {
-      // Get largest files and move them
-      const largestFiles = await this.getLargestFiles(primaryAccountId, 5);
-      
-      for (const file of largestFiles) {
-        try {
-          await this.moveFileToBackup(file.id, primaryAccountId, undefined, true);
-        } catch (error) {
-          console.error(`Failed to move file ${file.name}:`, error);
-        }
-      }
-    }
   }
 }

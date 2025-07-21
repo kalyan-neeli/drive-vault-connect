@@ -1,211 +1,29 @@
 import "../styles/global.css";
 import "../styles/file-explorer.css";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatBytes } from "@/utils/formatBytes";
-import { useToast } from "@/hooks/use-toast";
-import { DriveService, DriveFile } from "@/services/driveService";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { GoogleAccount } from "@/services/googleAuth";
 import { DriveTree } from "./DriveTree";
+import { AccountManager } from "./AccountManager";
 import { FilePreview } from "./FilePreview";
 import { GooglePhotosTree } from "./GooglePhotosTree";
-import { Eye, Download } from "lucide-react";
+import { LargestFilesView } from "./LargestFilesView";
+import { DriveFile } from "@/services/driveService";
 
 interface FileExplorerProps {
   accounts: GoogleAccount[];
 }
 
 export const FileExplorer = ({ accounts }: FileExplorerProps) => {
-  const [uploading, setUploading] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
-  const [targetAccount, setTargetAccount] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<'drive' | 'photos' | 'largest'>('drive');
+  const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [largeFiles, setLargeFiles] = useState<DriveFile[]>([]);
-  const [largePhotos, setLargePhotos] = useState<DriveFile[]>([]);
-  const [loadingLargeFiles, setLoadingLargeFiles] = useState(false);
-  const [loadingLargePhotos, setLoadingLargePhotos] = useState(false);
-  const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
-  const { toast } = useToast();
-  const [driveService] = useState(new DriveService());
 
-  useEffect(() => {
-    if (accounts.length > 0) {
-      loadLargeFiles();
-      loadLargePhotos();
-    }
-  }, [accounts, refreshTrigger]);
-
-  const loadLargeFiles = async () => {
-    const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
-    if (!primaryAccount) return;
-
-    setLoadingLargeFiles(true);
-    try {
-      const files = await driveService.getFiles(primaryAccount.id);
-      const sortedFiles = files
-        .filter(file => file.mimeType !== 'application/vnd.google-apps.folder')
-        .sort((a, b) => (b.size || 0) - (a.size || 0))
-        .slice(0, 20);
-      setLargeFiles(sortedFiles);
-    } catch (error) {
-      console.error('Error loading large files:', error);
-    } finally {
-      setLoadingLargeFiles(false);
-    }
-  };
-
-  const loadLargePhotos = async () => {
-    const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
-    if (!primaryAccount) return;
-
-    setLoadingLargePhotos(true);
-    try {
-      const photos = await driveService.getGooglePhotos(primaryAccount.id);
-      const sortedPhotos = photos
-        .sort((a, b) => (b.size || 0) - (a.size || 0))
-        .slice(0, 20);
-      setLargePhotos(sortedPhotos);
-    } catch (error) {
-      console.error('Error loading large photos:', error);
-    } finally {
-      setLoadingLargePhotos(false);
-    }
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || accounts.length === 0) return;
-
-    setUploading(true);
-    
-    try {
-      const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
-      if (primaryAccount) {
-        await driveService.checkStorageAndAutoMove(primaryAccount.id);
-      }
-
-      await driveService.uploadFile(file);
-      setRefreshTrigger(prev => prev + 1);
-      
-      toast({
-        title: "File Uploaded",
-        description: `Successfully uploaded ${file.name}`,
-      });
-    } catch (error) {
-      toast({
-        title: "Upload Failed",
-        description: "Failed to upload file",
-        variant: "destructive"
-      });
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleFileMove = async (fileId: string, targetFolderId: string, targetAccountId: string) => {
-    const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
-    if (!primaryAccount) return;
-
-    try {
-      await driveService.moveFileWithPath(fileId, primaryAccount.id, targetAccountId, targetFolderId, true);
-      setRefreshTrigger(prev => prev + 1);
-      
-      toast({
-        title: "File Moved",
-        description: "Successfully moved file to backup account",
-      });
-    } catch (error) {
-      toast({
-        title: "Move Failed",
-        description: error instanceof Error ? error.message : "Failed to move file",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const handleMoveSelectedFiles = async () => {
-    if (selectedFiles.length === 0 || !targetAccount) return;
-
-    const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
-    const backupAccount = accounts.find(acc => acc.id === targetAccount);
-    
-    if (!primaryAccount || !backupAccount) return;
-
-    try {
-      for (const fileId of selectedFiles) {
-        await driveService.moveFileWithPath(
-          fileId, 
-          primaryAccount.id, 
-          targetAccount, 
-          backupAccount.sharedFolderId || '', 
-          true
-        );
-      }
-      
-      setSelectedFiles([]);
-      setTargetAccount("");
-      setRefreshTrigger(prev => prev + 1);
-      
-      toast({
-        title: "Files Moved",
-        description: `Successfully moved ${selectedFiles.length} files to backup account`,
-      });
-    } catch (error) {
-      toast({
-        title: "Move Failed",
-        description: "Failed to move some files",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const handleMoveSelectedPhotos = async () => {
-    if (selectedPhotos.length === 0 || !targetAccount) return;
-
-    const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
-    const backupAccount = accounts.find(acc => acc.id === targetAccount);
-    
-    if (!primaryAccount || !backupAccount) return;
-
-    try {
-      for (const photoId of selectedPhotos) {
-        await driveService.movePhotoWithMetadata(
-          photoId, 
-          primaryAccount.id, 
-          targetAccount, 
-          backupAccount.sharedFolderId || '', 
-          true
-        );
-      }
-      
-      setSelectedPhotos([]);
-      setTargetAccount("");
-      setRefreshTrigger(prev => prev + 1);
-      
-      toast({
-        title: "Photos Moved",
-        description: `Successfully moved ${selectedPhotos.length} photos to backup account`,
-      });
-    } catch (error) {
-      toast({
-        title: "Move Failed",
-        description: "Failed to move some photos",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const handleFilePreview = (file: DriveFile) => {
-    setPreviewFile(file);
-    setShowPreview(true);
-  };
+  const primaryAccounts = accounts.filter(acc => acc.accountType === 'primary');
+  const backupAccounts = accounts.filter(acc => acc.accountType === 'backup');
 
   const handleRefresh = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -213,19 +31,19 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
 
   if (accounts.length === 0) {
     return (
-      <div className="file-explorer-container container-responsive">
-        <div className="file-explorer-header">
-          <h2 className="file-explorer-title">File Explorer</h2>
-          <p className="file-explorer-subtitle">Browse and manage files across all your connected Google Drive accounts</p>
+      <div className="space-y-6">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">File Explorer</h2>
+          <p className="text-gray-600">Browse and manage files across your Google Drive accounts</p>
         </div>
 
-        <Card className="text-center p-6 sm:p-8">
+        <Card className="text-center p-8">
           <CardContent className="pt-6">
-            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-full mx-auto mb-4 flex items-center justify-center">
-              <span className="text-xl sm:text-2xl">📁</span>
+            <div className="w-16 h-16 bg-gray-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+              <span className="text-2xl">📁</span>
             </div>
-            <h3 className="text-lg sm:text-xl font-semibold mb-2">No Files Available</h3>
-            <p className="text-gray-600 text-sm sm:text-base">
+            <h3 className="text-xl font-semibold mb-2">No Files Available</h3>
+            <p className="text-gray-600 mb-4">
               Connect Google accounts to view and manage your files
             </p>
           </CardContent>
@@ -234,308 +52,98 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
     );
   }
 
-  const primaryAccount = accounts.find(acc => acc.accountType === 'primary');
-  const backupAccounts = accounts.filter(acc => acc.accountType === 'backup');
-
   return (
-    <div className="file-explorer-container container-responsive">
-      <div className="file-explorer-header">
-        <h2 className="file-explorer-title">File Explorer</h2>
-        <p className="file-explorer-subtitle">Browse and manage files across all your connected Google Drive accounts</p>
+    <div className="space-y-6">
+      <div className="text-center">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">File Explorer</h2>
+        <p className="text-gray-600">Browse and manage files across your Google Drive accounts</p>
       </div>
 
-      <Tabs defaultValue="files" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="files">Files & Folders</TabsTrigger>
-          <TabsTrigger value="photos">Google Photos</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="files" className="space-y-4 sm:space-y-6">
-          <Card className="file-operations-card">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {accounts.map((account) => (
+          <Card key={account.id} className="h-fit">
             <CardHeader>
-              <CardTitle className="text-base sm:text-lg">File Operations</CardTitle>
-            </CardHeader>
-            <CardContent className="file-operations-content">
-              <div className="file-operations-buttons">
-                <div className="upload-button-container">
-                  <Input
-                    type="file"
-                    onChange={handleFileUpload}
-                    className="upload-input"
-                    disabled={uploading}
+              <CardTitle className="flex items-center space-x-3">
+                {account.avatar ? (
+                  <img 
+                    src={account.avatar} 
+                    alt={account.name}
+                    className="w-8 h-8 rounded-full"
                   />
-                  <Button disabled={uploading} className="button-responsive mobile-full-width">
-                    {uploading ? "Uploading..." : "Upload File"}
-                  </Button>
+                ) : (
+                  <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                    <span className="text-white text-sm font-semibold">
+                      {account.name.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-lg font-semibold truncate">{account.name}</h3>
+                  <p className="text-sm text-gray-600 truncate">{account.email}</p>
+                  <p className="text-xs text-gray-500">
+                    {account.accountType === 'primary' ? 'Primary Account' : 'Backup Account'}
+                  </p>
                 </div>
-                <Button onClick={handleRefresh} variant="outline" className="button-responsive mobile-full-width">
-                  Refresh
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="drive-grid">
-            {primaryAccount && (
-              <div className="drive-section">
-                <h3 className="drive-section-title">Primary Account</h3>
-                <DriveTree 
-                  key={`${primaryAccount.id}-${refreshTrigger}`}
-                  account={primaryAccount} 
-                  isBackup={false}
-                  onRefresh={handleRefresh}
-                  onFilePreview={handleFilePreview}
-                />
-              </div>
-            )}
-
-            {backupAccounts.length > 0 && (
-              <div className="drive-section">
-                <h3 className="drive-section-title">Backup Accounts</h3>
-                <div className="backup-accounts-container">
-                  {backupAccounts.map(account => (
-                    <DriveTree 
-                      key={`${account.id}-${refreshTrigger}`}
-                      account={account} 
-                      isBackup={true}
-                      onFileMove={handleFileMove}
-                      onRefresh={handleRefresh}
-                      onFilePreview={handleFilePreview}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {primaryAccount && (
-            <div className="large-files-section">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg">Largest Files (Primary Account)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {loadingLargeFiles ? (
-                    <div className="text-center py-4">
-                      <div className="animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                      <p className="text-sm">Loading files...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="large-files-grid">
-                        {largeFiles.map(file => (
-                          <div
-                            key={file.id}
-                            className={`file-card ${selectedFiles.includes(file.id) ? 'file-card-selected' : ''}`}
-                            onClick={() => {
-                              setSelectedFiles(prev => 
-                                prev.includes(file.id) 
-                                  ? prev.filter(id => id !== file.id)
-                                  : [...prev, file.id]
-                              );
-                            }}
-                          >
-                            <div className="file-card-content">
-                              <div className="flex items-center gap-2">
-                                {file.thumbnailUrl ? (
-                                  <img 
-                                    src={file.thumbnailUrl} 
-                                    alt={file.name}
-                                    className="file-thumbnail"
-                                  />
-                                ) : (
-                                  <div className="w-4 h-4 sm:w-5 sm:h-5 bg-gray-200 rounded flex-shrink-0"></div>
-                                )}
-                                <span className="file-card-name">{file.name}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="p-1 h-6 w-6 ml-auto"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleFilePreview(file);
-                                  }}
-                                >
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                              </div>
-                              <p className="file-card-size">{formatBytes(file.size || 0)}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      {selectedFiles.length > 0 && (
-                        <div className="move-files-section">
-                          <Select value={targetAccount} onValueChange={setTargetAccount}>
-                            <SelectTrigger className="w-full sm:w-64">
-                              <SelectValue placeholder="Select backup account" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {backupAccounts.map(account => (
-                                <SelectItem key={account.id} value={account.id}>
-                                  {account.email}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Button 
-                            onClick={handleMoveSelectedFiles}
-                            disabled={!targetAccount}
-                            className="button-responsive mobile-full-width"
-                          >
-                            Move {selectedFiles.length} Files
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="photos" className="space-y-4 sm:space-y-6">
-          <Card className="file-operations-card">
-            <CardHeader>
-              <CardTitle className="text-base sm:text-lg">Google Photos Operations</CardTitle>
+              </CardTitle>
             </CardHeader>
-            <CardContent className="file-operations-content">
-              <div className="file-operations-buttons">
-                <Button onClick={handleRefresh} variant="outline" className="button-responsive mobile-full-width">
-                  Refresh Photos
-                </Button>
-              </div>
+
+            <CardContent>
+              <Tabs 
+                value={activeTab} 
+                onValueChange={(value) => setActiveTab(value as 'drive' | 'photos' | 'largest')}
+                className="w-full"
+              >
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="drive">Drive Files</TabsTrigger>
+                  <TabsTrigger value="photos">Photos</TabsTrigger>
+                  <TabsTrigger value="largest">Largest Files</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="drive" className="mt-6">
+                  <DriveTree 
+                    account={account} 
+                    key={`${account.id}-${activeTab}-${refreshTrigger}`}
+                    onFileSelect={setSelectedFile}
+                  />
+                </TabsContent>
+
+                <TabsContent value="photos" className="mt-6">
+                  <GooglePhotosTree 
+                    account={account} 
+                    key={`photos-${account.id}-${activeTab}-${refreshTrigger}`}
+                    onFilePreview={setSelectedFile}
+                  />
+                </TabsContent>
+
+                <TabsContent value="largest" className="mt-6">
+                  {account.accountType === 'primary' && (
+                    <LargestFilesView 
+                      primaryAccount={account}
+                      backupAccounts={accounts.filter(acc => acc.accountType === 'backup')}
+                      key={`largest-${account.id}-${activeTab}-${refreshTrigger}`}
+                    />
+                  )}
+                  {account.accountType === 'backup' && (
+                    <div className="text-center py-8 text-gray-500">
+                      <p>Largest files view is only available for primary accounts</p>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
+        ))}
+      </div>
 
-          <div className="drive-grid">
-            {primaryAccount && (
-              <div className="drive-section">
-                <h3 className="drive-section-title">Primary Account Photos</h3>
-                <GooglePhotosTree 
-                  key={`photos-${primaryAccount.id}-${refreshTrigger}`}
-                  account={primaryAccount} 
-                  isBackup={false}
-                  onRefresh={handleRefresh}
-                  onFilePreview={handleFilePreview}
-                />
-              </div>
-            )}
-
-            {backupAccounts.length > 0 && (
-              <div className="drive-section">
-                <h3 className="drive-section-title">Backup Account Photos</h3>
-                <div className="backup-accounts-container">
-                  {backupAccounts.map(account => (
-                    <GooglePhotosTree 
-                      key={`photos-${account.id}-${refreshTrigger}`}
-                      account={account} 
-                      isBackup={true}
-                      onRefresh={handleRefresh}
-                      onFilePreview={handleFilePreview}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {primaryAccount && (
-            <div className="large-files-section">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg">Largest Photos (Primary Account)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {loadingLargePhotos ? (
-                    <div className="text-center py-4">
-                      <div className="animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                      <p className="text-sm">Loading photos...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="large-files-grid">
-                        {largePhotos.map(photo => (
-                          <div
-                            key={photo.id}
-                            className={`file-card ${selectedPhotos.includes(photo.id) ? 'file-card-selected' : ''}`}
-                            onClick={() => {
-                              setSelectedPhotos(prev => 
-                                prev.includes(photo.id) 
-                                  ? prev.filter(id => id !== photo.id)
-                                  : [...prev, photo.id]
-                              );
-                            }}
-                          >
-                            <div className="file-card-content">
-                              <div className="flex items-center gap-2">
-                                {photo.thumbnailUrl ? (
-                                  <img 
-                                    src={photo.thumbnailUrl} 
-                                    alt={photo.name}
-                                    className="file-thumbnail"
-                                  />
-                                ) : (
-                                  <div className="w-4 h-4 sm:w-5 sm:h-5 bg-gray-200 rounded flex-shrink-0"></div>
-                                )}
-                                <span className="file-card-name">{photo.name}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="p-1 h-6 w-6 ml-auto"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleFilePreview(photo);
-                                  }}
-                                >
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                              </div>
-                              <p className="file-card-size">{formatBytes(photo.size || 0)}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      {selectedPhotos.length > 0 && (
-                        <div className="move-files-section">
-                          <Select value={targetAccount} onValueChange={setTargetAccount}>
-                            <SelectTrigger className="w-full sm:w-64">
-                              <SelectValue placeholder="Select backup account" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {backupAccounts.map(account => (
-                                <SelectItem key={account.id} value={account.id}>
-                                  {account.email}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Button 
-                            onClick={handleMoveSelectedPhotos}
-                            disabled={!targetAccount}
-                            className="button-responsive mobile-full-width"
-                          >
-                            Move {selectedPhotos.length} Photos
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      {showPreview && previewFile && (
-        <FilePreview 
-          file={previewFile}
-          onClose={() => setShowPreview(false)}
-        />
+      {selectedFile && (
+        <Dialog open={true} onOpenChange={() => setSelectedFile(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh]">
+            <FilePreview
+              file={selectedFile}
+              onClose={() => setSelectedFile(null)}
+            />
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
