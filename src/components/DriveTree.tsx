@@ -6,11 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { formatBytes } from "@/utils/formatBytes";
 import { useToast } from "@/hooks/use-toast";
 import { DriveService, DriveFile } from "@/services/driveService";
 import { GoogleAccount } from "@/services/googleAuth";
-import { Folder, File, Plus, Trash2, FolderPlus, ChevronRight, ChevronDown, Eye } from "lucide-react";
+import { Folder, File, Plus, Trash2, FolderPlus, ChevronRight, ChevronDown, Eye, ExternalLink, Loader2 } from "lucide-react";
 
 interface DriveTreeProps {
   account: GoogleAccount;
@@ -39,6 +40,9 @@ export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [currentParentId, setCurrentParentId] = useState<string | null>(null);
+  const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
+  const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
+  const [deleteItemType, setDeleteItemType] = useState<'file' | 'folder' | null>(null);
 
   const driveService = new DriveService();
   const { toast } = useToast();
@@ -97,7 +101,7 @@ export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
     });
   };
 
-  const handleFolderToggle = (folderId: string) => {
+  const handleFolderToggle = async (folderId: string) => {
     if (expandedFolders.has(folderId)) {
       const newExpanded = new Set(expandedFolders);
       newExpanded.delete(folderId);
@@ -110,7 +114,17 @@ export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
       // Load folder contents if not already loaded
       const folderNode = findNodeById(files, folderId);
       if (folderNode && !folderNode.isChildrenLoaded) {
-        loadFiles(folderId);
+        // Show loading indicator for this folder
+        setLoadingFolders(prev => new Set(prev).add(folderId));
+        try {
+          await loadFiles(folderId);
+        } finally {
+          setLoadingFolders(prev => {
+            const updated = new Set(prev);
+            updated.delete(folderId);
+            return updated;
+          });
+        }
       }
     }
   };
@@ -158,40 +172,44 @@ export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
     }
   };
 
-  const handleDeleteFile = async (fileId: string) => {
+  const handleDeleteConfirm = async () => {
+    if (!deleteItemId || !deleteItemType) return;
+    
     try {
-      await driveService.deleteFile(fileId, account.id);
-      loadFiles(); // Refresh root files
-      toast({
-        title: "Success",
-        description: "File deleted successfully",
-      });
+      if (deleteItemType === 'file') {
+        await driveService.deleteFile(deleteItemId, account.id);
+        toast({
+          title: "Success",
+          description: "File deleted successfully",
+        });
+      } else {
+        await driveService.deleteFolder(deleteItemId, account.id);
+        toast({
+          title: "Success",
+          description: "Folder deleted successfully",
+        });
+      }
+      
+      // Refresh the files
+      setFiles([]);
+      setExpandedFolders(new Set());
+      loadFiles();
     } catch (error) {
-      console.error('Error deleting file:', error);
+      console.error('Error deleting item:', error);
       toast({
         title: "Error",
-        description: "Failed to delete file",
+        description: `Failed to delete ${deleteItemType}`,
         variant: "destructive",
       });
+    } finally {
+      setDeleteItemId(null);
+      setDeleteItemType(null);
     }
   };
 
-  const handleDeleteFolder = async (folderId: string) => {
-    try {
-      await driveService.deleteFolder(folderId, account.id);
-      loadFiles(); // Refresh root files
-      toast({
-        title: "Success",
-        description: "Folder deleted successfully",
-      });
-    } catch (error) {
-      console.error('Error deleting folder:', error);
-      toast({
-        title: "Error",
-        description: "Failed to delete folder",
-        variant: "destructive",
-      });
-    }
+  const handleDeleteCancel = () => {
+    setDeleteItemId(null);
+    setDeleteItemType(null);
   };
 
   const handleFilePreview = (node: TreeNode) => {
@@ -212,9 +230,14 @@ export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
     }
   };
 
+  const handleViewInDrive = (fileId: string) => {
+    const driveUrl = `https://drive.google.com/file/d/${fileId}/view`;
+    window.open(driveUrl, '_blank');
+  };
+
   const renderTreeNode = (node: TreeNode, depth: number = 0): React.ReactNode => {
     const isExpanded = expandedFolders.has(node.id);
-    const hasChildren = node.children && node.children.length > 0;
+    const isLoadingChildren = loadingFolders.has(node.id);
     
     return (
       <div key={node.id} className="drive-tree-node-container">
@@ -223,16 +246,21 @@ export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
           style={{ paddingLeft: `${depth * 20}px` }}
         >
           <div className="drive-tree-node-content">
-            <button
-              onClick={() => handleFolderToggle(node.id)}
-              className="drive-tree-expand-button"
-            >
-              {expandedFolders.has(node.id) ? (
-                <ChevronDown className="drive-tree-node-icon" />
-              ) : (
-                <ChevronRight className="drive-tree-node-icon" />
-              )}
-            </button>
+            {node.type === 'folder' && (
+              <button
+                onClick={() => handleFolderToggle(node.id)}
+                className="drive-tree-expand-button"
+                disabled={isLoadingChildren}
+              >
+                {isLoadingChildren ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : isExpanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+              </button>
+            )}
 
             <div className="drive-tree-node-icon">
               {node.type === 'folder' ? (
@@ -257,14 +285,26 @@ export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
 
           <div className="drive-tree-node-actions">
             {node.type === 'file' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleFilePreview(node)}
-                className="drive-tree-action-button"
-              >
-                <Eye className="h-3 w-3" />
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleFilePreview(node)}
+                  className="drive-tree-action-button"
+                  title="Preview file"
+                >
+                  <Eye className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleViewInDrive(node.id)}
+                  className="drive-tree-action-button"
+                  title="View in Google Drive"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </Button>
+              </>
             )}
 
             {node.type === 'folder' && (
@@ -273,23 +313,54 @@ export const DriveTree = ({ account, onFileSelect }: DriveTreeProps) => {
                 size="sm"
                 onClick={() => setCurrentParentId(node.id)}
                 className="drive-tree-action-button"
+                title="Add subfolder"
               >
                 <FolderPlus className="h-3 w-3" />
               </Button>
             )}
 
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => node.type === 'folder' ? handleDeleteFolder(node.id) : handleDeleteFile(node.id)}
-              className="drive-tree-action-button text-red-500 hover:text-red-700"
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setDeleteItemId(node.id);
+                    setDeleteItemType(node.type);
+                  }}
+                  className="drive-tree-action-button text-red-500 hover:text-red-700"
+                  title={`Delete ${node.type}`}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {node.type}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to delete "{node.name}"? This action cannot be undone.
+                    {node.type === 'folder' && ' All contents of this folder will also be deleted.'}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      setDeleteItemId(node.id);
+                      setDeleteItemType(node.type);
+                      handleDeleteConfirm();
+                    }}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
 
-        {node.children && expandedFolders.has(node.id) && (
+        {node.type === 'folder' && isExpanded && node.children && (
           <div className="drive-tree-children">
             {node.children.map(child => renderTreeNode(child, depth + 1))}
           </div>

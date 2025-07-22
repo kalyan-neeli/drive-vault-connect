@@ -2,11 +2,12 @@ import "../styles/drive-tree.css";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { formatBytes } from "@/utils/formatBytes";
 import { useToast } from "@/hooks/use-toast";
 import { DriveService, DriveFile } from "@/services/driveService";
 import { GoogleAccount, GoogleAuthService } from "@/services/googleAuth";
-import { Folder, Image, ChevronRight, ChevronDown, Eye } from "lucide-react";
+import { Folder, Image, ChevronRight, ChevronDown, Eye, ExternalLink, Loader2, Trash2 } from "lucide-react";
 
 
 interface GooglePhotosTreeProps {
@@ -40,6 +41,8 @@ export const GooglePhotosTree = ({ account, isBackup = false, onRefresh, onFileP
   const [treeData, setTreeData] = useState<PhotoNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [expandingFolders, setExpandingFolders] = useState<Set<string>>(new Set());
+  const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
   const { toast } = useToast();
   const [driveService] = useState(new DriveService());
   const [googleAuth] = useState(new GoogleAuthService());
@@ -123,7 +126,9 @@ export const GooglePhotosTree = ({ account, isBackup = false, onRefresh, onFileP
     return rootNodes.sort((a, b) => b.name.localeCompare(a.name));
   };
 
-  const toggleNode = (nodeId: string) => {
+  const toggleNode = async (nodeId: string) => {
+    setExpandingFolders(prev => new Set(prev).add(nodeId));
+    
     const updateNodes = (nodes: PhotoNode[]): PhotoNode[] => {
       return nodes.map(node => {
         if (node.id === nodeId) {
@@ -135,7 +140,17 @@ export const GooglePhotosTree = ({ account, isBackup = false, onRefresh, onFileP
         return node;
       });
     };
+    
     setTreeData(updateNodes(treeData));
+    
+    // Simulate loading time for folder expansion
+    setTimeout(() => {
+      setExpandingFolders(prev => {
+        const updated = new Set(prev);
+        updated.delete(nodeId);
+        return updated;
+      });
+    }, 500);
   };
 
   const handleDragStart = (e: React.DragEvent, nodeId: string, nodeName: string) => {
@@ -185,8 +200,35 @@ export const GooglePhotosTree = ({ account, isBackup = false, onRefresh, onFileP
     }
   };
 
+  const handleViewInDrive = (fileId: string) => {
+    const driveUrl = `https://drive.google.com/file/d/${fileId}/view`;
+    window.open(driveUrl, '_blank');
+  };
+
+  const handleDeletePhoto = async (photoId: string) => {
+    try {
+      await driveService.deleteFile(photoId, account.id);
+      toast({
+        title: "Success",
+        description: "Photo deleted successfully",
+      });
+      // Refresh the photos tree
+      await loadPhotosTree();
+    } catch (error) {
+      console.error('Error deleting photo:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete photo",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteItemId(null);
+    }
+  };
+
   const renderNode = (node: PhotoNode, level: number = 0): React.ReactNode => {
     const isSelected = selectedNode === node.id;
+    const isExpanding = expandingFolders.has(node.id);
     const paddingLeft = `${level * 16 + 8}px`;
 
     return (
@@ -210,8 +252,15 @@ export const GooglePhotosTree = ({ account, isBackup = false, onRefresh, onFileP
                   e.stopPropagation();
                   toggleNode(node.id);
                 }}
+                disabled={isExpanding}
               >
-                {node.expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {isExpanding ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : node.expanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
               </Button>
             )}
             
@@ -238,17 +287,65 @@ export const GooglePhotosTree = ({ account, isBackup = false, onRefresh, onFileP
           
           <div className="drive-tree-node-actions">
             {node.type === 'photo' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="drive-tree-action-button text-blue-600"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handlePhotoPreview(node);
-                }}
-              >
-                <Eye className="h-3 w-3" />
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="drive-tree-action-button text-blue-600"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePhotoPreview(node);
+                  }}
+                  title="Preview photo"
+                >
+                  <Eye className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="drive-tree-action-button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleViewInDrive(node.id);
+                  }}
+                  title="View in Google Drive"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="drive-tree-action-button text-red-500 hover:text-red-700"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteItemId(node.id);
+                      }}
+                      title="Delete photo"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete Photo</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Are you sure you want to delete "{node.name}"? This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => handleDeletePhoto(node.id)}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
             )}
           </div>
         </div>

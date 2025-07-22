@@ -22,6 +22,13 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
   const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  // Handle tab change to trigger fresh data loading
+  const handleTabChange = (value: string) => {
+    setActiveTab(value as 'drive' | 'photos' | 'largest');
+    // Increment trigger to force refresh of components
+    setRefreshTrigger(prev => prev + 1);
+  };
+
   const primaryAccounts = accounts.filter(acc => acc.accountType === 'primary');
   const backupAccounts = accounts.filter(acc => acc.accountType === 'backup');
 
@@ -90,7 +97,7 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
             <CardContent>
               <Tabs 
                 value={activeTab} 
-                onValueChange={(value) => setActiveTab(value as 'drive' | 'photos' | 'largest')}
+                onValueChange={handleTabChange}
                 className="w-full"
               >
                 <TabsList className="grid w-full grid-cols-3">
