@@ -21,7 +21,7 @@
   }
 
   .tree-actions {
-    @apply flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
+    @apply flex gap-1 opacity-100 transition-opacity;
   }
 
   .drive-tree-card {
@@ -60,7 +60,7 @@
     @apply tree-node group;
   } */
   .drive-tree-node {
-    @apply tree-node;
+    @apply tree-node group;
   }
 
   .drive-tree-node-selected {
@@ -84,7 +84,7 @@
   }
 
   .drive-tree-node-actions {
-    @apply tree-actions;
+    @apply flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
   }
 
   .drive-tree-expand-button {
@@ -92,7 +92,7 @@
   }
 
   .drive-tree-action-button {
-    @apply p-1 h-6 w-6 flex-shrink-0;
+    @apply p-1 h-6 w-6 flex-shrink-0 hover:bg-gray-100 rounded;
   }
 
   .drive-tree-children {
