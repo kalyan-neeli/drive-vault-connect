@@ -1,4 +1,7 @@
 @import url('./styles/global.css');
+@import url('./styles/file-explorer.css');
+@import url('./styles/drive-tree.css');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -68,7 +71,3 @@
   }
 }
 
-/* Import component-specific styles */
-@import url('./styles/global.css');
-@import url('./styles/file-explorer.css');
-@import url('./styles/drive-tree.css');

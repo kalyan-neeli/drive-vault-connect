@@ -60,7 +60,7 @@
     @apply tree-node group;
   } */
   .drive-tree-node {
-    @apply tree-node group;
+    @apply flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer border border-transparent transition-colors group;
   }
 
   .drive-tree-node-selected {

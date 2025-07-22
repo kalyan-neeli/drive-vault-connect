@@ -13,9 +13,10 @@ import { File, MoveRight } from "lucide-react";
 interface LargestFilesViewProps {
   primaryAccount: GoogleAccount;
   backupAccounts: GoogleAccount[];
+  onFileSelect?: (file: DriveFile) => void;
 }
 
-export const LargestFilesView = ({ primaryAccount, backupAccounts }: LargestFilesViewProps) => {
+export const LargestFilesView = ({ primaryAccount, backupAccounts, onFileSelect }: LargestFilesViewProps) => {
   const [largestFiles, setLargestFiles] = useState<DriveFile[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [targetAccountId, setTargetAccountId] = useState<string>("");

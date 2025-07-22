@@ -105,36 +105,36 @@ export const AccountManager = ({ accounts, onAccountsChange }: AccountManagerPro
           {accounts.map((account) => (
             <Card key={account.id}>
               <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex items-center space-x-4 flex-1 min-w-0">
                     {account.avatar ? (
                       <img 
                         src={account.avatar} 
                         alt={account.name}
-                        className="w-12 h-12 rounded-full"
+                        className="w-12 h-12 rounded-full flex-shrink-0"
                       />
                     ) : (
-                      <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                      <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
                         <span className="text-white font-semibold">
                           {account.name.charAt(0).toUpperCase()}
                         </span>
                       </div>
                     )}
-                     <div>
-                      <h4 className="font-semibold flex items-center gap-2">
-                        {account.name}
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-semibold flex flex-wrap items-center gap-2">
+                        <span className="truncate">{account.name}</span>
                         {account.accountType === 'primary' && (
-                          <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                          <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full whitespace-nowrap">
                             Primary
                           </span>
                         )}
                         {account.accountType === 'backup' && (
-                          <span className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded-full">
+                          <span className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded-full whitespace-nowrap">
                             Backup
                           </span>
                         )}
                       </h4>
-                      <p className="text-sm text-gray-600">{account.email}</p>
+                      <p className="text-sm text-gray-600 truncate">{account.email}</p>
                       <p className="text-xs text-gray-500">
                         {formatBytes(account.usedStorage)} of {formatBytes(account.totalStorage)} used
                       </p>
@@ -145,12 +145,13 @@ export const AccountManager = ({ accounts, onAccountsChange }: AccountManagerPro
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2 sm:flex-shrink-0">
                     {account.accountType === 'backup' && (
                       <Button 
                         variant="outline" 
                         size="sm"
                         onClick={() => handleSetPrimary(account.id)}
+                        className="w-full sm:w-auto"
                       >
                         Set as Primary
                       </Button>
@@ -159,6 +160,7 @@ export const AccountManager = ({ accounts, onAccountsChange }: AccountManagerPro
                       variant="destructive" 
                       size="sm"
                       onClick={() => handleRemoveAccount(account.id)}
+                      className="w-full sm:w-auto"
                     >
                       Remove
                     </Button>

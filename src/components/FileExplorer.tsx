@@ -128,6 +128,7 @@ export const FileExplorer = ({ accounts }: FileExplorerProps) => {
                       primaryAccount={account}
                       backupAccounts={accounts.filter(acc => acc.accountType === 'backup')}
                       key={`largest-${account.id}-${activeTab}-${refreshTrigger}`}
+                      onFileSelect={setSelectedFile}
                     />
                   )}
                   {account.accountType === 'backup' && (
